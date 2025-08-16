@@ -362,15 +362,15 @@ int ISMCTS::findBestMove(GST &game, DATA &d) {
         GST simulationState = determinizedState;
 
         // 隨機選擇一個子節點進行模擬
-        if (!currentNode->children.empty()) {
-            std::uniform_int_distribution<> dist(0, currentNode->children.size() - 1);
-            int randomIndex = dist(rng);
-            auto it = std::next(currentNode->children.begin(), randomIndex);
-            nodeToSimulate = it->get();
-
-            // 在確定化狀態上執行這個 move
-            simulationState.do_move(nodeToSimulate->move);
-        }
+        //if (!currentNode->children.empty()) {
+        //    std::uniform_int_distribution<> dist(0, currentNode->children.size() - 1);
+        //    int randomIndex = dist(rng);
+        //    auto it = std::next(currentNode->children.begin(), randomIndex);
+        //    nodeToSimulate = it->get();
+        //
+        //    // 在確定化狀態上執行這個 move
+        //    simulationState.do_move(nodeToSimulate->move);
+        //}
         int result = simulation(simulationState, d);
 
         // 更新 arrangement_stats
