@@ -22,7 +22,7 @@ private:
     // 節點選擇（根據 UCB）
     void selection(Node*& node, GST& determinizedState);
     // 節點擴展（產生所有合法子節點）
-    void expansion(Node* node, const GST& determinizedState);
+    void expansion(Node* node, GST& determinizedState);
     // 隨機模擬（模擬遊戲直到結束，回傳勝負）
     double simulation(GST& state, DATA& d);
     // 反向傳播（將結果回傳至路徑上的所有節點）

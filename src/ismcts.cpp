@@ -187,7 +187,7 @@ void ISMCTS::selection(Node*& node, GST& determinizedState) {
 // 擴展階段
 // =============================
 // 對未結束節點產生所有合法子節點
-void ISMCTS::expansion(Node *node, const GST &determinizedState) {
+void ISMCTS::expansion(Node *node, GST &determinizedState) {
     if (node->state.is_over()) return;
 
     // 在確定化狀態上生成所有合法移動
@@ -197,10 +197,15 @@ void ISMCTS::expansion(Node *node, const GST &determinizedState) {
     int moveCount = nodeState.gen_all_move(moves);
 
     for (int i = 0; i < moveCount; i++) {
+        // 檢查是否已經拓展過
+        for(auto& child : node->children){
+            if(child->move == moves[i]){
+                break;
+            }
+        }
+
         int move = moves[i];
         int piece = move >> 4;
-
-        if (piece >= PIECES) continue;
 
         // 確保移動的棋子在合法範圍內
         int dir = move & 0xf;
@@ -212,6 +217,8 @@ void ISMCTS::expansion(Node *node, const GST &determinizedState) {
         newNode->parent = node;
         node->children.push_back(std::move(newNode));
     }
+    node = node->children.back().get();
+    determinizedState.do_move(node->move);
 }
 
 // =============================
