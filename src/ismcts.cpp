@@ -157,11 +157,36 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 // 根據 UCB 選擇最佳子節點
 void ISMCTS::selection(Node*& node, GST& determinizedState) {
     while (!node->state.is_over() && !node->children.empty()) {
+        // 在確定化狀態上生成所有合法移動
+        GST nodeState = determinizedState;
+        int moves[MAX_MOVES];
+        int moveCount = nodeState.gen_all_move(moves);
+        if (moveCount == 0) break;
+
         Node* bestChild = nullptr;
         double bestUCB = -std::numeric_limits<double>::infinity();
 
+        //檢查是否在當前確定化所有action都被拓展過
+        for(int i = 0; i < moveCount; i++){
+            bool moveFound = false;
+            for(auto& child : node->children){
+                if(child->move == moves[i]){
+                    moveFound = true;
+                    break;
+                }
+            }
+            if(!moveFound){
+                return;
+            }
+        }
+
         // 在確定化狀態上選擇最佳子節點
         for (auto& child : node->children) {
+            // 使用 STL 檢查 child->move 是否在當前合法移動列表中
+            if (std::find(moves, moves + moveCount, child->move) == moves + moveCount) {
+                continue;
+            }
+            
             if (child->visits == 0) {
                 node = child.get();
                 determinizedState.do_move(node->move);
