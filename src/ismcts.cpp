@@ -196,11 +196,7 @@ void ISMCTS::selection(Node*& node, GST& d /* determinizedState */,
         double bestU = -1e100;
 
         for (auto* c : cand) {
-            const int    n_vis   = std::max(1, c->visits);
-            const int    n_avail = std::max(1, c->avail);   // ← 這是 child 自己的 availability
-            const double mean    = c->wins / n_vis;
-            const double bonus   = EXPLORATION_PARAM * std::sqrt(std::log((double)n_avail) / n_vis);
-            const double u       = mean + bonus;
+            const double u = calculateUCB(c);
             if (u > bestU) { bestU = u; best = c; }
         }
         avail_path.push_back(cand);
@@ -255,7 +251,7 @@ double ISMCTS::simulation(GST &state, DATA &d, int root_player) {
 
     int moves[MAX_MOVES];
     int moveCount;
-    int maxMoves = 1000;
+    int maxMoves = 200;
     int step = 0;
 
     std::uniform_int_distribution<> dist(0, INT_MAX);
@@ -266,7 +262,7 @@ double ISMCTS::simulation(GST &state, DATA &d, int root_player) {
         if (moveCount == 0) break;
 
         int move;
-        double epsilon = std::max(0.1, 1.0 - (double)step / 1000.0);
+        double epsilon = std::max(0.1, 1.0 - static_cast<double>(step) / maxMoves);
 
         if (simState.nowTurn == USER) {
             if (probDist(rng) < epsilon) {
@@ -285,7 +281,7 @@ double ISMCTS::simulation(GST &state, DATA &d, int root_player) {
     if (!simState.is_over() && step >= maxMoves) return 0.0; // 平手/截斷
 
     int winner = simState.get_winner();
-    return (winner == root_player) ? 1 : -1;
+    return (winner == root_player) ? 1.0 : -1.0;
 }
 
 // =============================
@@ -316,7 +312,9 @@ double ISMCTS::calculateUCB(const Node *node) const {
     if (node->visits == 0) return std::numeric_limits<double>::infinity();
     
     double winRate = static_cast<double>(node->wins) / node->visits;
-    double exploration = EXPLORATION_PARAM * std::sqrt(std::log(node->parent->visits) / node->visits);
+    int avail = std::max(1, node->avail);
+    int visits = std::max(1, node->visits);
+    double exploration = EXPLORATION_PARAM * std::sqrt(std::log(avail) / visits);
 
     // UCB公式：利用 + 探索
     return winRate + exploration;
@@ -359,7 +357,7 @@ int ISMCTS::findBestMove(GST &game, DATA &d) {
         Node* nodeToSimulate = currentNode;
         GST simulationState = determinizedState;
 
-        int result = simulation(determinizedState, d, root_player);
+        double result = simulation(determinizedState, d, root_player);
 
         // 更新 arrangement_stats
         std::string arrangementKey;
