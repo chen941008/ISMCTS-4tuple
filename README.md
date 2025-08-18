@@ -45,18 +45,18 @@ best_move 修改為 `int best_move = ismcts.findBestMove(game, data);` 就能兩
 
 編譯指令如下 (名稱可修改) :
 
-> g++ -o Tomorin_merge main.cpp MyAI.cpp ../4T_GST_impl.cpp ../4T_DATA_impl.cpp ../ismcts.cpp ../node.cpp -std=c++11 -O2
+> g++ -o Tomorin_merge main.cpp MyAI.cpp ../4T_GST_impl.cpp ../4T_DATA_impl.cpp ../ismcts.cpp ../node.cpp -std=c++14 -O2
 
 
 ## 本地測試 (gst、gst-endgame)
 
 要在 /src/server 編譯才讀得到 DATA 資料，不然會報錯
 
-> g++ -std=c++11 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst
+> g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst
 >
 > ./gst
 
-> g++ -std=c++11 -O2 ../gst-endgame.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_endgame
+> g++ -std=c++14 -O2 ../gst-endgame.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_endgame
 >
 > ./gst_endgame
 
