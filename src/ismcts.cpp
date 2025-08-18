@@ -213,11 +213,8 @@ void ISMCTS::selection(Node*& node, GST& d /* determinizedState */,
 Node* ISMCTS::expansion(Node *node, GST &determinizedState) {
     if (determinizedState.is_over()) return nullptr;
 
-    // 在確定化狀態上生成所有合法移動
-    GST nodeState = determinizedState;
-
     int moves[MAX_MOVES];
-    int moveCount = nodeState.gen_all_move(moves);
+    int moveCount = determinizedState.gen_all_move(moves);
 
     // U = 當前 d 下尚未展開的合法動作集合
     std::vector<int> U;
@@ -353,10 +350,6 @@ int ISMCTS::findBestMove(GST &game, DATA &d) {
             }
         }
 
-        // 確保有子節點可選擇
-        Node* nodeToSimulate = currentNode;
-        GST simulationState = determinizedState;
-
         double result = simulation(determinizedState, d, root_player);
 
         // 更新 arrangement_stats
@@ -373,7 +366,7 @@ int ISMCTS::findBestMove(GST &game, DATA &d) {
         stats.second += 1;                  // 模擬次數
 
         // 反向傳播結果
-        backpropagation(nodeToSimulate, result, avail_path);
+        backpropagation(currentNode, result, avail_path);
     }
 
     Node* bestChild = nullptr;
