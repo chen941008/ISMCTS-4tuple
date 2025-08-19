@@ -229,7 +229,7 @@ Node* ISMCTS::expansion(Node *node, GST &determinizedState) {
     if (U.empty()) return nullptr;
 
     int move = U[rng() % U.size()];           // 均勻隨機挑一個
-    auto newNode = std::make_unique<Node>(determinizedState, move); // 節點不要存整盤面也行；至少存 move
+    auto newNode = std::make_unique<Node>(move); // 節點不要存整盤面也行；至少存 move
     newNode->parent = node;
     Node* ret = newNode.get();
     node->children.push_back(std::move(newNode));
@@ -323,7 +323,7 @@ double ISMCTS::calculateUCB(const Node *node) const {
 // 進行多次模擬，選出訪問次數最多的子節點
 int ISMCTS::findBestMove(GST &game, DATA &d) {
     Node::cleanup(root);
-    root.reset(new Node(game));
+    root.reset(new Node());
     arrangement_stats.clear();
 
     // 固定 root 視角

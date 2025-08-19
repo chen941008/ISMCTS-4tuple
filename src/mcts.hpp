@@ -18,8 +18,8 @@ private:
     std::unique_ptr<Node> root;        // 樹根節點
 
     // MCTS 四大階段
-    void selection(Node*& node);       // 節點選擇
-    void expansion(Node* node);        // 節點擴展
+    void selection(Node*& node, GST& state);       // 節點選擇
+    void expansion(Node* node, GST& state);        // 節點擴展
     int simulation(GST& state);        // 隨機模擬
     void backpropagation(Node* node, int result); // 反向傳播
     double calculateUCB(const Node* node) const;  // 計算 UCB

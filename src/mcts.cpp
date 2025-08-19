@@ -44,8 +44,8 @@ bool MCTS::would_eat_enemy_red(const GST& game, int piece, int dst) const {
 // =============================
 // 選擇階段：根據 UCB 選擇最佳子節點
 // =============================
-void MCTS::selection(Node*& node) {
-    while (!node->state.is_over() && !node->children.empty()) {
+void MCTS::selection(Node*& node, GST& state) {
+    while (!state.is_over() && !node->children.empty()) {
         Node* bestChild = nullptr;
         double bestUCB = -std::numeric_limits<double>::infinity();
 
@@ -69,23 +69,23 @@ void MCTS::selection(Node*& node) {
 // =============================
 // 擴展階段：產生所有合法子節點
 // =============================
-void MCTS::expansion(Node* node) {
-    if (node->state.is_over()) return;
+void MCTS::expansion(Node* node, GST& state) {
+    if (state.is_over()) return;
 
     int moves[MAX_MOVES];
-    int moveCount = node->state.gen_all_move(moves);
+    int moveCount = state.gen_all_move(moves);
 
     for (int i = 0; i < moveCount; i++) {
         int move = moves[i];
         int piece = move >> 4;
         int dir = move & 0xf;
-        int dst = node->state.get_pos(piece) + dir_val[dir];
+        int dst = state.get_pos(piece) + dir_val[dir];
     
-        if (would_eat_enemy_red(node->state, piece, dst)) continue;
+        if (would_eat_enemy_red(state, piece, dst)) continue;
     
-        GST newState = node->state;
+        GST newState = state;
         newState.do_move(move);
-        std::unique_ptr<Node> newNode(new Node(newState, move));
+        std::unique_ptr<Node> newNode(new Node(move));
         newNode->parent = node;
         node->children.push_back(std::move(newNode));
     }
@@ -147,17 +147,17 @@ double MCTS::calculateUCB(const Node* node) const {
 // =============================
 int MCTS::findBestMove(GST& game) {
     Node::cleanup(root);
-    root.reset(new Node(game));
+    root.reset(new Node());
     
     for (int i = 0; i < simulations; i++) {
         Node* currentNode = root.get();
 
         // 選擇階段
-        selection(currentNode);
+        selection(currentNode, game);
         
         // 如果節點沒有子節點且遊戲未結束，進行擴展
-        if (currentNode->children.empty() && !currentNode->state.is_over()) {
-            expansion(currentNode);
+        if (currentNode->children.empty() && !game.is_over()) {
+            expansion(currentNode, game);
         }
         
         // 確保有子節點可選擇
@@ -172,7 +172,8 @@ int MCTS::findBestMove(GST& game) {
         }
 
         // 執行這個 move
-        GST simulationState = nodeToSimulate->state;
+        GST simulationState = game;
+        simulationState.do_move(nodeToSimulate->move);
         int result = simulation(simulationState);
         
         // 反向傳播結果

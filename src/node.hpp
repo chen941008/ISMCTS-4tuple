@@ -10,7 +10,6 @@
 // =============================
 class Node {
 public:
-    GST state;                        // 節點對應的棋盤狀態
     int move;                         // 由父節點到此節點的移動（-1:根節點）
     double wins;                      // 節點累積勝利分數
     int visits;                       // 節點被訪問次數
@@ -18,7 +17,7 @@ public:
     Node* parent;                     // 父節點指標
     std::vector<std::unique_ptr<Node>> children; // 子節點列表
 
-    Node(GST state, int move = -1);   // 建構子
+    Node(int move = -1);   // 建構子
 
     // 遞迴清理整棵子樹
     static void cleanup(std::unique_ptr<Node>& node) {
