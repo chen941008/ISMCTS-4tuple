@@ -159,12 +159,11 @@ void ISMCTS::selection(Node*& node, GST& d) {
     while (!d.is_over()) {
         int moves[MAX_MOVES]; 
         int n = d.gen_all_move(moves);
-
+        if (n == 0) break;
         for (int i = 0; i < n; ++i) {
             node->avail_cnt[moves[i]]++;
         }
         
-        if (n == 0) break;
 
         // 是否 fully-expanded（以「當前 d」為準）
         bool fully = true;
@@ -254,7 +253,6 @@ double ISMCTS::simulation(GST &state, DATA &d, int root_player) {
     int maxMoves = 200;
     int step = 0;
 
-    std::uniform_int_distribution<> dist(0, INT_MAX);
     std::uniform_real_distribution<> probDist(0.0, 1.0);
 
     while (!simState.is_over() && step < maxMoves) {
