@@ -13,7 +13,7 @@ public:
     int move;                         // 由父節點到此節點的移動（-1:根節點）
     double wins;                      // 節點累積勝利分數
     int visits;                       // 節點被訪問次數
-    int avail;                        // availability count
+    std::unordered_map<int,int> avail_cnt;
     Node* parent;                     // 父節點指標
     std::vector<std::unique_ptr<Node>> children; // 子節點列表
 

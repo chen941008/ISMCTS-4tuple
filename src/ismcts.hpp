@@ -20,14 +20,13 @@ private:
     // MCTS 四大階段的私有方法
     // =============================
     // 節點選擇（根據 UCB）
-    void selection(Node*& node, GST& d, std::vector<std::vector<Node*>>& avail_path);
+    void selection(Node*& node, GST& d);
     // 節點擴展（產生所有合法子節點）
     Node* expansion(Node* node, GST& determinizedState);
     // 隨機模擬（模擬遊戲直到結束，回傳勝負）
     double simulation(GST& state, DATA& d, int root_player);
     // 反向傳播（將結果回傳至路徑上的所有節點）
-    void backpropagation(Node* leaf, double result,
-                             const std::vector<std::vector<Node*>>& avail_path);
+    void backpropagation(Node* leaf, double result);
     // 計算 UCB 值（平衡探索與利用）
     double calculateUCB(const Node* node) const;
     // 取得確定化狀態（隨機化未知棋子顏色）

@@ -155,11 +155,15 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 // 選擇階段
 // =============================
 // 根據 UCB 選擇最佳子節點
-void ISMCTS::selection(Node*& node, GST& d /* determinizedState */,
-                       std::vector<std::vector<Node*>>& avail_path) {
+void ISMCTS::selection(Node*& node, GST& d) {
     while (!d.is_over()) {
         int moves[MAX_MOVES]; 
         int n = d.gen_all_move(moves);
+
+        for (int i = 0; i < n; ++i) {
+            node->avail_cnt[moves[i]]++;
+        }
+        
         if (n == 0) break;
 
         // 是否 fully-expanded（以「當前 d」為準）
@@ -185,7 +189,6 @@ void ISMCTS::selection(Node*& node, GST& d /* determinizedState */,
         for (auto* c : cand) if (c->visits == 0) unvisited.push_back(c);
         if (!unvisited.empty()) {
             Node* next = unvisited[rng() % unvisited.size()];
-            avail_path.push_back(cand);      // 記錄「當時可被選兄弟集合」
             node = next;
             d.do_move(node->move);
             continue;
@@ -199,7 +202,6 @@ void ISMCTS::selection(Node*& node, GST& d /* determinizedState */,
             const double u = calculateUCB(c);
             if (u > bestU) { bestU = u; best = c; }
         }
-        avail_path.push_back(cand);
         node = best;
         d.do_move(node->move);
     }
@@ -285,16 +287,11 @@ double ISMCTS::simulation(GST &state, DATA &d, int root_player) {
 // 反向傳播階段
 // =============================
 // 將模擬結果回傳至路徑上的所有節點
-void ISMCTS::backpropagation(Node* leaf, double result,
-                             const std::vector<std::vector<Node*>>& avail_path) {
+void ISMCTS::backpropagation(Node* leaf, double result) {
     // 1 N/W（固定 root 視角 result）
     for (Node* p = leaf; p; p = p->parent) {
         p->visits += 1;
         p->wins   += result;
-    }
-    // 2 availability：沿途每一層 cand 的每個兄弟（含被選到的自己）+1
-    for (const auto& cand : avail_path) {
-        for (Node* s : cand) s->avail += 1;   // ★ 你要在 Node 裡新增 int avail = 0;
     }
 }
 
@@ -305,16 +302,28 @@ void ISMCTS::backpropagation(Node* leaf, double result,
 // UCB = 勝率 + 探索項
 // 若未訪問則回傳無窮大
 // =============================
-double ISMCTS::calculateUCB(const Node *node) const {
-    if (node->visits == 0) return std::numeric_limits<double>::infinity();
-    
-    double winRate = static_cast<double>(node->wins) / node->visits;
-    int avail = std::max(1, node->avail);
-    int visits = std::max(1, node->visits);
-    double exploration = EXPLORATION_PARAM * std::sqrt(std::log(avail) / visits);
+double ISMCTS::calculateUCB(const Node* node) const {
+    // 未被訪問過：直接無窮大（先探索）
+    if (!node || node->visits == 0) return std::numeric_limits<double>::infinity();
 
-    // UCB公式：利用 + 探索
-    return winRate + exploration;
+    // 平均回報（若 wins 代表±1 累積，這裡就是 mean ∈ [-1, 1]）
+    double mean = static_cast<double>(node->wins) / node->visits;
+
+    // 取父節點的 availability 計數（父節點×action）
+    int avail = 1; // 至少 1，避免 log(0)
+    if (node->parent) {
+        const auto& m = node->parent->avail_cnt;
+        auto it = m.find(node->move);
+        if (it != m.end()) avail = it->second;
+    }
+
+    // 分母 visits 也保底
+    int visits = std::max(1, node->visits);
+
+    // 探索項：log(avail) / visits
+    double exploration = EXPLORATION_PARAM * std::sqrt(std::log(static_cast<double>(avail)) / visits);
+
+    return mean + exploration;
 }
 
 // =============================
@@ -335,11 +344,8 @@ int ISMCTS::findBestMove(GST &game, DATA &d) {
         // 獲取確定化狀態
         GST determinizedState = getDeterminizedState(game, i);
 
-        // 這次迭代沿途每一層「可被選兄弟集合」快照（給 availability 用）
-        std::vector<std::vector<Node*>> avail_path;
-
         // 選擇階段
-        selection(currentNode, determinizedState, avail_path);
+        selection(currentNode, determinizedState);
 
         // 如果節點沒有子節點且遊戲未結束，進行擴展
         if (!determinizedState.is_over()) {
@@ -366,7 +372,7 @@ int ISMCTS::findBestMove(GST &game, DATA &d) {
         stats.second += 1;                  // 模擬次數
 
         // 反向傳播結果
-        backpropagation(currentNode, result, avail_path);
+        backpropagation(currentNode, result);
     }
 
     Node* bestChild = nullptr;
