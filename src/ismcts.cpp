@@ -188,7 +188,8 @@ void ISMCTS::selection(Node*& node, GST& d) {
         std::vector<Node*> unvisited;
         for (auto* c : cand) if (c->visits == 0) unvisited.push_back(c);
         if (!unvisited.empty()) {
-            Node* next = unvisited[rng() % unvisited.size()];
+            std::uniform_int_distribution<int> pick(0, (int)unvisited.size()-1);
+            Node* next = unvisited[pick(rng)];
             node = next;
             d.do_move(node->move);
             continue;
@@ -230,7 +231,7 @@ Node* ISMCTS::expansion(Node *node, GST &determinizedState) {
 
     if (U.empty()) return nullptr;
 
-    int move = U[rng() % U.size()];           // 均勻隨機挑一個
+    int move = U[ std::uniform_int_distribution<int>(0, (int)U.size()-1)(rng) ];
     auto newNode = std::make_unique<Node>(move); // 節點不要存整盤面也行；至少存 move
     newNode->parent = node;
     Node* ret = newNode.get();
@@ -260,17 +261,19 @@ double ISMCTS::simulation(GST &state, DATA &d, int root_player) {
         moveCount = simState.gen_all_move(moves);
         if (moveCount == 0) break;
 
+        std::uniform_int_distribution<int> pick(0, moveCount - 1);
+
         int move;
         double epsilon = std::max(0.1, 1.0 - static_cast<double>(step) / maxMoves);
 
         if (simState.nowTurn == USER) {
             if (probDist(rng) < epsilon) {
-                move = moves[dist(rng) % moveCount];
+                move = moves[pick(rng)]; 
             } else {
                 move = simState.highest_weight(d);
             }
         } else {
-            move = moves[dist(rng) % moveCount];
+            move = moves[pick(rng)]; 
         }
 
         simState.do_move(move);
