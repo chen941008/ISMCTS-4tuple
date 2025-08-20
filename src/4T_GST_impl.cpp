@@ -574,13 +574,23 @@ int GST::highest_weight(DATA& d){
         else if(pos[piece] == 35 && direction == 2 && nowTurn == ENEMY && board[35] == -BLUE){
             WEIGHT[move_index] = 1;        
         }
-        else if(pos[piece] == 4 && direction == 2 && nowTurn == USER && color[piece] == BLUE){      //當初為了比賽加的，所以只寫User的部分，Enemy要再補上
-            if(board[5] >= 0 && board[11] >= 0){
+        else if(pos[piece] == 4 && direction == 2 && nowTurn == USER && color[piece] == BLUE){      
+            if(board[5] == 0 && board[11] >= 0){
                 WEIGHT[move_index] = 1;
             }
         }
-        else if(pos[piece] == 1 && direction == 1 && nowTurn == USER && color[piece] == BLUE){      //同上
-            if(board[0] >= 0 && board[6] >= 0){
+        else if(pos[piece] == 1 && direction == 1 && nowTurn == USER && color[piece] == BLUE){      
+            if(board[0] == 0 && board[6] >= 0){
+                WEIGHT[move_index] = 1;
+            }
+        }
+        else if(pos[piece] == 34 && direction == 2 && nowTurn == ENEMY && color[piece] == -BLUE){      
+            if(board[35] == 0 && board[29] <= 0){
+                WEIGHT[move_index] = 1;
+            }
+        }
+        else if(pos[piece] == 31 && direction == 1 && nowTurn == ENEMY && color[piece] == -BLUE){      
+            if(board[30] == 0 && board[24] <= 0){
                 WEIGHT[move_index] = 1;
             }
         }
