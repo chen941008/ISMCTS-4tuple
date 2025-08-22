@@ -397,6 +397,8 @@ struct GameStats {
     int ismcts_escape;
     int ismcts_enemy_red;
     int ismcts_enemy_blue;
+    int ismcts_total_steps;
+    double ismcts_total_times;
     // MCTS (Player 2) 統計
     int mcts_wins;
     int mcts_escape;
@@ -405,7 +407,7 @@ struct GameStats {
     // 平局
     int draws;
 
-    GameStats() : total_games(0), mcts_wins(0), mcts_escape(0), mcts_enemy_red(0), mcts_enemy_blue(0),
+    GameStats() : total_games(0), mcts_wins(0), mcts_escape(0), mcts_enemy_red(0), mcts_enemy_blue(0), ismcts_total_steps(0), ismcts_total_times(0.0),
                   ismcts_wins(0), ismcts_escape(0), ismcts_enemy_red(0), ismcts_enemy_blue(0), draws(0) {}
 };
 
@@ -417,6 +419,9 @@ void print_game_stats(const GameStats& stats) {
     std::cout << "  - 藍子逃脫: " << stats.ismcts_escape << " 場\n";
     std::cout << "  - 紅子被吃光: " << stats.ismcts_enemy_red << " 場\n";
     std::cout << "  - 吃光對手藍子: " << stats.ismcts_enemy_blue << " 場\n\n";
+    std::cout << "ISMCTS 總思考步數: " << stats.ismcts_total_steps << "\n";
+    std::cout << "ISMCTS 總思考時間: " << stats.ismcts_total_times << " ms\n";
+    std::cout << "ISMCTS 平均思考時間: " << (stats.ismcts_total_times / stats.ismcts_total_steps) << " ms\n";
 
     std::cout << "MCTS 獲勝: " << stats.mcts_wins << " 場\n";
     std::cout << "  - 藍子逃脫: " << stats.mcts_escape << " 場\n";
@@ -810,7 +815,11 @@ int main() {
         while(!game.is_over()) {
             if(my_turn) {
                 if(num_games == 1) std::cout << "Player 1 (ISMCTS) 思考中...\n";
+                stats.ismcts_total_steps++;
+                auto start = std::chrono::steady_clock::now();
                 int move = ismcts.findBestMove(game,data);
+                auto end = std::chrono::steady_clock::now();
+                stats.ismcts_total_times += std::chrono::duration<double, std::milli>(end - start).count();
                 if (move == -1) break;
                 game.do_move(move);
             } else {
