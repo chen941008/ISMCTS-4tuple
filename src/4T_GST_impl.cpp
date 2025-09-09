@@ -1,6 +1,42 @@
 #include "4T_header.h"
 #include "ismcts.hpp"
 #include "mcts.hpp"
+#include <cmath>    // exp, isfinite
+#include <limits>   // numeric_limits
+
+// 選擇策略（編譯期旗標）：
+// SELECTION_MODE = 2 -> softmax 抽樣（預設）
+// SELECTION_MODE = 1 -> 線性權重抽樣 p_i = w_i / Σw（負值自動平移）
+// SELECTION_MODE = 0 -> 直接取最高分（argmax）
+// 相容舊旗標：-DUSE_SOFTMAX_SELECTION=1/0 分別對應 softmax/線性
+#ifndef SELECTION_MODE
+    #ifdef USE_SOFTMAX_SELECTION
+        #if USE_SOFTMAX_SELECTION
+            #define SELECTION_MODE 2
+        #else
+            #define SELECTION_MODE 1
+        #endif
+    #else
+        #define SELECTION_MODE 2
+    #endif
+#endif
+
+#if SELECTION_MODE == 2
+    #pragma message("Compiling with softmax selection")
+#elif SELECTION_MODE == 1
+    #pragma message("Compiling with linear selection")
+#else
+    #pragma message("Compiling with argmax selection")
+#endif
+
+
+// 放在函式內最上面（或檔案區域）：一次播種、整段重用
+static thread_local pcg32 rng(std::random_device{}());
+// 產生 u ∈ [0,1)
+auto next_u01 = []() {
+    return static_cast<double>(rng()) / (static_cast<double>(pcg32::max()) + 1.0);
+};
+
 
 // =============================
 // 靜態變數：棋子、方向、初始位置、pattern offset
@@ -746,30 +782,83 @@ int GST::highest_weight(DATA& d){
         //printf("Move = %d | piece: %c, direction: %d, WEIGHT[]: %f\n\n", move_index, print_piece[piece], direction, WEIGHT[move_index]);
     }
 
-    float max_weight = -1;
-    int do_idx = -1, same_idx = 0, SAME[MAX_MOVES] = {0};
+    // 共用統計（max/min/argmax）與 RNG
+    float max_weight = -std::numeric_limits<float>::infinity();
+    float min_weight =  std::numeric_limits<float>::infinity();
+    int   best_idx   = -1;
 
-    for(int i = 0; i < root_nmove; i++){
-        if(WEIGHT[i] == max_weight){
-            SAME[same_idx++] = i;
-        }
-        else if(WEIGHT[i] > max_weight){
-            max_weight = WEIGHT[i];
-            do_idx = i;           //which step we decided to move finally
-            SAME[0] = i;
-            same_idx = 1;
-        }
+    for (int i = 0; i < root_nmove; ++i) {
+        const float wi = WEIGHT[i];
+        if (!(wi == wi)) continue; // 跳過 NaN
+        if (wi > max_weight) { max_weight = wi; best_idx = i; }
+        if (wi < min_weight) { min_weight = wi; }
+    }
+    if (best_idx < 0) {
+        best_idx   = 0;   // 全 NaN 時的保底
+        max_weight = 0.0f;
+        min_weight = 0.0f;
     }
 
-    auto now = std::chrono::system_clock::now();
-    auto now_as_duration = now.time_since_epoch();
-    auto now_as_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(now_as_duration).count();
-    pcg32 rng(now_as_microseconds);
-    if(same_idx > 1){
-        int x = rng(same_idx - 1);
-        do_idx = SAME[x];
-    }
-    // printf("return: %d\n", root_moves[do_idx]);
+    int chosen_idx = best_idx; // 預設為 argmax
 
-    return root_moves[do_idx];
+#if SELECTION_MODE == 2
+    // softmax 機率抽樣
+    const double temperature = 1.0; // 可視需求調整
+    const double T = std::max(1e-9, temperature); // 防 0/負溫度
+    std::vector<double> probs(root_nmove, 0.0);
+    double sumProb = 0.0;
+    for (int i = 0; i < root_nmove; i++) {
+        double wi = static_cast<double>(WEIGHT[i]);
+        if (!(wi == wi)) { // NaN -> 當 0
+            probs[i] = 0.0;
+            continue;
+        }
+        double v = std::exp((wi - static_cast<double>(max_weight)) / T);
+        if (!std::isfinite(v)) v = 0.0;
+        probs[i] = v;
+        sumProb += v;
+    }
+    if (sumProb > 0.0 && std::isfinite(sumProb)) {
+        double u = next_u01();
+        double target = u * sumProb;
+        double acc = 0.0;
+        for (int i = 0; i < root_nmove; i++) {
+            acc += probs[i];
+            if (target < acc) { chosen_idx = i; break; } // 改成嚴格比較
+        }
+        if (chosen_idx < 0) chosen_idx = best_idx;
+    }
+#elif SELECTION_MODE == 1
+    // 線性權重抽樣（負數平移，Σw=0 回退 argmax）
+    const double shift = (min_weight < 0.0f) ? -static_cast<double>(min_weight) : 0.0;
+    std::vector<double> w(root_nmove, 0.0);
+    double sumW = 0.0;
+    for (int i = 0; i < root_nmove; i++) {
+        double wi = static_cast<double>(WEIGHT[i]);
+        if (!(wi == wi)) { // NaN -> 當 0
+            w[i] = 0.0;
+            continue;
+        }
+        double vi = wi + shift;
+        if (vi < 0.0) vi = 0.0;
+        w[i] = vi;
+        sumW += vi;
+    }
+    if (sumW > 0.0 && std::isfinite(sumW)) {
+        double u = next_u01();
+        double target = u * sumW;
+        double acc = 0.0;
+        for (int i = 0; i < root_nmove; i++) {
+            acc += w[i];
+            if (target < acc) { chosen_idx = i; break; }
+        }
+        if (chosen_idx < 0) chosen_idx = best_idx;
+    }
+#else
+    // 直接使用 argmax（已在 best_idx 計算）
+#endif
+
+    // 萬一前面沒選到（極少見的邊界），保底 argmax
+    if (chosen_idx < 0 || chosen_idx >= root_nmove) chosen_idx = best_idx;
+    return root_moves[chosen_idx];
 }
