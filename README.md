@@ -2,6 +2,20 @@
 
 幽靈棋 4-tuple + ISMCTS 合併版，可正常編譯連接伺服器的執行檔，同時提供本地測試程式
 
+### 快速使用指南
+
+本程式支援三種 AI 選擇策略：
+
+1. **Softmax 機率抽樣** (`SELECTION_MODE=2`, 預設) - 適合需要探索性的對局
+2. **線性權重抽樣** (`SELECTION_MODE=1`) - 平衡探索與利用
+3. **Argmax 直接選擇** (`SELECTION_MODE=0`) - 總是選擇最佳動作，適合追求最高勝率
+
+編譯時添加 `-DSELECTION_MODE=X` 參數來選擇模式，例如：
+```bash
+# 在 src/server/ 目錄下
+g++ -o Tomorin_softmax main.cpp MyAI.cpp ../4T_GST_impl.cpp ../4T_DATA_impl.cpp ../ismcts.cpp ../node.cpp -std=c++14 -O2 -DSELECTION_MODE=2
+```
+
 ## 資料夾架構與介紹：
 ```
 src/
@@ -31,6 +45,33 @@ src/
 
 記得要根據需求修改 `MyAI::Generate_move(char* move)` 的 best_move，或是 `ISMCTS::simulation(GST &state,DATA &d)` 的 move
 
+### 選擇策略模式
+
+程式支援三種選擇策略，可在編譯時通過 `-DSELECTION_MODE=X` 指定：
+
+- **SELECTION_MODE=2** (預設): **Softmax 機率抽樣** - 使用溫度參數的 softmax 分佈進行機率性選擇
+- **SELECTION_MODE=1**: **線性權重抽樣** - 按權重比例進行機率性選擇（負權重會自動平移）
+- **SELECTION_MODE=0**: **Argmax 直接選擇** - 直接選擇權重最高的動作
+
+### 編譯不同模式的執行檔
+
+**Softmax 模式（預設）:**
+```bash
+g++ -o Tomorin_softmax main.cpp MyAI.cpp ../4T_GST_impl.cpp ../4T_DATA_impl.cpp ../ismcts.cpp ../node.cpp -std=c++14 -O2 -DSELECTION_MODE=2
+```
+
+**線性權重模式:**
+```bash
+g++ -o Tomorin_linear main.cpp MyAI.cpp ../4T_GST_impl.cpp ../4T_DATA_impl.cpp ../ismcts.cpp ../node.cpp -std=c++14 -O2 -DSELECTION_MODE=1
+```
+
+**Argmax 模式:**
+```bash
+g++ -o Tomorin_argmax main.cpp MyAI.cpp ../4T_GST_impl.cpp ../4T_DATA_impl.cpp ../ismcts.cpp ../node.cpp -std=c++14 -O2 -DSELECTION_MODE=0
+```
+
+### AI 組合模式
+
 4-tuple:
 
 best_move 修改為 `int best_move = game.highest_weight(data);` 就是單純的 4-tuple
@@ -43,7 +84,7 @@ merge:
 
 best_move 修改為 `int best_move = ismcts.findBestMove(game, data);` 就能兩種都用到
 
-編譯指令如下 (名稱可修改) :
+### 通用編譯指令（使用預設 softmax 模式）
 
 > g++ -o Tomorin_merge main.cpp MyAI.cpp ../4T_GST_impl.cpp ../4T_DATA_impl.cpp ../ismcts.cpp ../node.cpp -std=c++14 -O2
 
@@ -51,6 +92,48 @@ best_move 修改為 `int best_move = ismcts.findBestMove(game, data);` 就能兩
 ## 本地測試 (gst、gst-endgame)
 
 要在 /src/server 編譯才讀得到 DATA 資料，不然會報錯
+
+### 編譯不同選擇模式的本地測試
+
+**Softmax 模式（預設）:**
+```bash
+g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_softmax -DSELECTION_MODE=2
+./gst_softmax
+```
+
+**線性權重模式:**
+```bash
+g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_linear -DSELECTION_MODE=1
+./gst_linear
+```
+
+**Argmax 模式:**
+```bash
+g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_argmax -DSELECTION_MODE=0
+./gst_argmax
+```
+
+### 殘局測試編譯
+
+**Softmax 模式:**
+```bash
+g++ -std=c++14 -O2 ../gst-endgame.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_endgame_softmax -DSELECTION_MODE=2
+./gst_endgame_softmax
+```
+
+**線性權重模式:**
+```bash
+g++ -std=c++14 -O2 ../gst-endgame.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_endgame_linear -DSELECTION_MODE=1
+./gst_endgame_linear
+```
+
+**Argmax 模式:**
+```bash
+g++ -std=c++14 -O2 ../gst-endgame.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_endgame_argmax -DSELECTION_MODE=0
+./gst_endgame_argmax
+```
+
+### 通用編譯指令（使用預設 softmax 模式）
 
 > g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst
 >
