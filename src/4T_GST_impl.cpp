@@ -590,6 +590,88 @@ int GST::highest_weight(DATA& d){
     int root_moves[MAX_MOVES];
     root_nmove = gen_all_move(root_moves);
 
+    // ================== 【優化：角落獎勵計算移至迴圈外】 ==================
+    // 這整段邏輯 (std::vector, std::sort, 分配任務) 在 highest_weight 函式中
+    // 只需要計算 "一次"，而不是 "每評估一步棋m" 都重算一次。
+    
+    // 存儲每個棋子到各角落的距離
+    std::vector<std::tuple<int, int, int>> pieces_distances; // (棋子索引, 角落編號, 距離)
+        
+    if(nowTurn == USER){
+        // 計算所有棋子到各角落的距離
+        for(int i = 0; i < PIECES; i++){
+            if(pos[i] != -1){
+                int p_row = pos[i] / 6;
+                int p_col = pos[i] % 6;
+                
+                // 計算這個棋子到四個角落的距離
+                int dist_to_0 = p_row + p_col;
+                int dist_to_5 = p_row + (5 - p_col);
+                int dist_to_30 = (5 - p_row) + p_col;
+                int dist_to_35 = (5 - p_row) + (5 - p_col);
+                
+                // 添加所有棋子-角落距離組合
+                pieces_distances.push_back(std::make_tuple(i, 0, dist_to_0));
+                pieces_distances.push_back(std::make_tuple(i, 1, dist_to_5));
+                pieces_distances.push_back(std::make_tuple(i, 2, dist_to_30));
+                pieces_distances.push_back(std::make_tuple(i, 3, dist_to_35));
+            }
+        }
+    }
+    else if(nowTurn == ENEMY){
+        for(int i = PIECES; i < PIECES * 2; i++){
+            if(pos[i] != -1){
+                int p_row = pos[i] / 6;
+                int p_col = pos[i] % 6;
+                
+                // 計算这个棋子到四個角落的距離
+                int dist_to_0 = p_row + p_col;
+                int dist_to_5 = p_row + (5 - p_col);
+                int dist_to_30 = (5 - p_row) + p_col;
+                int dist_to_35 = (5 - p_row) + (5 - p_col);
+                
+                // 添加所有棋子-角落距離組合
+                pieces_distances.push_back(std::make_tuple(i, 0, dist_to_0));
+                pieces_distances.push_back(std::make_tuple(i, 1, dist_to_5));
+                pieces_distances.push_back(std::make_tuple(i, 2, dist_to_30));
+                pieces_distances.push_back(std::make_tuple(i, 3, dist_to_35));
+            }
+        }
+    }
+        
+    // 按距離排序所有棋子-角落組合
+    std::sort(pieces_distances.begin(), pieces_distances.end(),
+    [](const std::tuple<int, int, int>& a, const std::tuple<int, int, int>& b){
+        return std::get<2>(a) < std::get<2>(b);
+    });
+    
+    // 已分配的棋子和角落
+    bool piece_assigned[PIECES * 2];
+    bool corner_assigned[4];
+    int assigned_corner_for_piece[PIECES * 2]; // 關鍵：[棋子編號] -> 該去的角落
+
+    memset(piece_assigned, false, sizeof(piece_assigned));
+    memset(corner_assigned, false, sizeof(corner_assigned));
+    memset(assigned_corner_for_piece, -1, sizeof(assigned_corner_for_piece));
+    
+    // 按距離分配棋子到角落
+    for(const auto& tuple : pieces_distances) {
+        int p_idx = std::get<0>(tuple);
+        int corner = std::get<1>(tuple);
+        
+        if(!piece_assigned[p_idx] && !corner_assigned[corner]) {
+            piece_assigned[p_idx] = true;
+            corner_assigned[corner] = true;
+            assigned_corner_for_piece[p_idx] = corner; // 把任務記下來
+        }
+        
+        if(corner_assigned[0] && corner_assigned[1] && corner_assigned[2] && corner_assigned[3]) {
+            break;
+        }
+    }
+    // ================== 【優化：結束】 ==================
+
+
     for(int m = 0; m < root_nmove; m++){
         int move_index = m;
         int piece = root_moves[m] >> 4;
@@ -597,8 +679,7 @@ int GST::highest_weight(DATA& d){
         int src = pos[piece];
         int dst = src + dir_val[direction];  //the position after move
 
-        // 如果我方的藍棋在對方的角落上就直接出去
-        if(pos[piece] == 0 && direction == 1 && nowTurn == USER && board[0] == BLUE){
+        if(pos[piece] == 0 && direction == 1 && nowTurn == USER && board[0] == BLUE){  // if check_win_move() = true, won't move and return directly
             WEIGHT[move_index] = 1;
         }
         else if(pos[piece] == 5 && direction == 2 && nowTurn == USER && board[5] == BLUE){
@@ -608,24 +689,24 @@ int GST::highest_weight(DATA& d){
             WEIGHT[move_index] = 1;
         }
         else if(pos[piece] == 35 && direction == 2 && nowTurn == ENEMY && board[35] == -BLUE){
-            WEIGHT[move_index] = 1;        
+            WEIGHT[move_index] = 1;
         }
-        else if(pos[piece] == 4 && direction == 2 && nowTurn == USER && color[piece] == BLUE){      
+        else if(pos[piece] == 4 && direction == 2 && nowTurn == USER && color[piece] == BLUE){
             if(board[5] == 0 && board[11] >= 0){
                 WEIGHT[move_index] = 1;
             }
         }
-        else if(pos[piece] == 1 && direction == 1 && nowTurn == USER && color[piece] == BLUE){      
+        else if(pos[piece] == 1 && direction == 1 && nowTurn == USER && color[piece] == BLUE){
             if(board[0] == 0 && board[6] >= 0){
                 WEIGHT[move_index] = 1;
             }
         }
-        else if(pos[piece] == 34 && direction == 2 && nowTurn == ENEMY && color[piece] == -BLUE){      
+        else if(pos[piece] == 34 && direction == 2 && nowTurn == ENEMY && color[piece] == -BLUE){
             if(board[35] == 0 && board[29] <= 0){
                 WEIGHT[move_index] = 1;
             }
         }
-        else if(pos[piece] == 31 && direction == 1 && nowTurn == ENEMY && color[piece] == -BLUE){      
+        else if(pos[piece] == 31 && direction == 1 && nowTurn == ENEMY && color[piece] == -BLUE){
             if(board[30] == 0 && board[24] <= 0){
                 WEIGHT[move_index] = 1;
             }
@@ -647,7 +728,7 @@ int GST::highest_weight(DATA& d){
             for(int i = 0; i < PIECES * 2; i++) color[i] = tmp_color[i];
         }
 
-        //調參數時間，以下程式的目標是讓每個角落把離他最近的棋拉過去
+        //調參數時間
         int row = dst / 6;
         int col = dst % 6;
         
@@ -657,94 +738,17 @@ int GST::highest_weight(DATA& d){
         int d30 = (5 - row) + col;              // 到 (5,0) 的距離
         int d35 = (5 - row) + (5 - col);        // 到 (5,5) 的距離
         
-        // 存儲每個棋子到各角落的距離
-        std::vector<std::tuple<int, int, int>> pieces_distances; // (棋子索引, 角落編號, 距離)
-            
-        if(nowTurn == USER){
-            // 計算所有棋子到各角落的距離
-            for(int i = 0; i < PIECES; i++){
-                if(pos[i] != -1){
-                    int p_row = pos[i] / 6;
-                    int p_col = pos[i] % 6;
-                    
-                    // 計算這個棋子到四個角落的距離
-                    int dist_to_0 = p_row + p_col;
-                    int dist_to_5 = p_row + (5 - p_col);
-                    int dist_to_30 = (5 - p_row) + p_col;
-                    int dist_to_35 = (5 - p_row) + (5 - p_col);
-                    
-                    // 添加所有棋子-角落距離組合
-                    pieces_distances.push_back(std::make_tuple(i, 0, dist_to_0));
-                    pieces_distances.push_back(std::make_tuple(i, 1, dist_to_5));
-                    pieces_distances.push_back(std::make_tuple(i, 2, dist_to_30));
-                    pieces_distances.push_back(std::make_tuple(i, 3, dist_to_35));
-                }
-            }
-        }
-        else if(nowTurn == ENEMY){
-            for(int i = PIECES; i < PIECES * 2; i++){
-                if(pos[i] != -1){
-                    int p_row = pos[i] / 6;
-                    int p_col = pos[i] % 6;
-                    
-                    // 計算這個棋子到四個角落的距離
-                    int dist_to_0 = p_row + p_col;
-                    int dist_to_5 = p_row + (5 - p_col);
-                    int dist_to_30 = (5 - p_row) + p_col;
-                    int dist_to_35 = (5 - p_row) + (5 - p_col);
-                    
-                    // 添加所有棋子-角落距離組合
-                    pieces_distances.push_back(std::make_tuple(i, 0, dist_to_0));
-                    pieces_distances.push_back(std::make_tuple(i, 1, dist_to_5));
-                    pieces_distances.push_back(std::make_tuple(i, 2, dist_to_30));
-                    pieces_distances.push_back(std::make_tuple(i, 3, dist_to_35));
-                }
-            }
-        }
-            
-        // 按距離排序所有棋子-角落組合
-        std::sort(pieces_distances.begin(), pieces_distances.end(), 
-        [](const std::tuple<int, int, int>& a, const std::tuple<int, int, int>& b){
-            return std::get<2>(a) < std::get<2>(b);
-        });
-        
-        // 已分配的棋子和角落
-        bool piece_assigned[PIECES * 2];
-        bool corner_assigned[4];
-        int assigned_corner_for_piece[PIECES * 2];
-
-        memset(piece_assigned, false, sizeof(piece_assigned));
-        memset(corner_assigned, false, sizeof(corner_assigned));
-        memset(assigned_corner_for_piece, -1, sizeof(assigned_corner_for_piece));
-        
-        // 按距離分配棋子到角落
-        for(const auto& tuple : pieces_distances) {
-            int p_idx = std::get<0>(tuple);
-            int corner = std::get<1>(tuple);
-            
-            // 如果這個棋子和角落都還沒被分配，則進行分配
-            if(!piece_assigned[p_idx] && !corner_assigned[corner]) {
-                piece_assigned[p_idx] = true;
-                corner_assigned[corner] = true;
-                assigned_corner_for_piece[p_idx] = corner;
-            }
-            
-            // 如果所有角落都已分配，停止循環
-            if(corner_assigned[0] && corner_assigned[1] && corner_assigned[2] && corner_assigned[3]) {
-                break;
-            }
-        }
+        // 【!!!】 原本在這裡的 std::vector, std::sort, for... 都被移到上面了
         
         // 角落獎勵係數
         float corner_bonus = 1.0;
         
         // 檢查當前棋子是否被分配到某個角落
+        // 這裡 "使用" 在迴圈外算好的 assigned_corner_for_piece
         if(assigned_corner_for_piece[piece] != -1) {
             int assigned_corner = assigned_corner_for_piece[piece];
             int current_dist;
 
-            //printf("piece = %c, assigned_corner = %d\n", print_piece[piece], assigned_corner);
-            
             // 計算當前位置到分配角落的距離
             int p_row = src / 6;
             int p_col = src % 6;
@@ -766,7 +770,7 @@ int GST::highest_weight(DATA& d){
                     corner_bonus = 1.01;
                 }
             } else if(assigned_corner == 3) {
-                current_dist = (5 - p_row) + (5 - p_col);
+                current_dist = (5 - p_row) + (5 - col);
                 if(d35 < current_dist) {
                     corner_bonus = 1.01;
                 }
@@ -782,6 +786,7 @@ int GST::highest_weight(DATA& d){
         //printf("Move = %d | piece: %c, direction: %d, WEIGHT[]: %f\n\n", move_index, print_piece[piece], direction, WEIGHT[move_index]);
     }
 
+    // 【!!! 保留你新的結尾邏輯 !!!】
     // 共用統計（max/min/argmax）與 RNG
     float max_weight = -std::numeric_limits<float>::infinity();
     float min_weight =  std::numeric_limits<float>::infinity();
