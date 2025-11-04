@@ -49,8 +49,8 @@ public:
     
     bool is_valid_pattern(int base_pos, const int* offset); // 檢查4-tuple pattern是否合法
     int get_loc(int base_pos, const int* offset);           // 取得4-tuple pattern的位置編碼
-    int get_feature_unknown(int base_pos, const int* offset); // 取得4-tuple pattern的特徵編碼
-    float get_weight(int base_pos, const int* offset, DATA&); // 取得4-tuple pattern的權重
+    int get_feature_unknown(int base_pos, const int* offset, const int* feature_cache); // 取得4-tuple pattern的特徵編碼
+    float get_weight(int base_pos, const int* offset, DATA& d, const int* feature_cache); // 取得4-tuple pattern的權重
     float compute_board_weight(DATA&);                      // 計算整個棋盤的平均權重
     int highest_weight(DATA&);           
                        // 取得權重最高的合法移動

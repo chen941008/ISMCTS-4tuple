@@ -506,34 +506,42 @@ int GST::get_loc(int base_pos, const int* offset){
 
 // =============================
 // GST::get_feature_unknown
-// 取得4-tuple pattern的特徵編碼
+// 獲取給定位置和偏移量的特徵編碼
 // =============================
-int GST::get_feature_unknown(int base_pos, const int* offset){           // the piece color
+int GST::get_feature_unknown(int base_pos, const int* offset, const int* feature_cache){
     int features[4];
     for(int i = 0; i < 4; i++){
         int pos = base_pos + offset[i];
-        if(nowTurn == USER){
-            features[i] = (board[pos] < 0) ? 3 : board[pos];
-        }
-        else{
-            features[i] = (board[pos] > 0) ? 3 : -board[pos];
-        }
+        
+        // 【!!! 舊的程式碼 (已刪除) !!!】
+        // if(nowTurn == USER){
+        //     features[i] = (board[pos] < 0) ? 3 : board[pos];
+        // }
+        // else{
+        //     features[i] = (board[pos] > 0) ? 3 : -board[pos];
+        // }
+        
+        // 【!!! 新的程式碼 !!!】
+        // 直接從 L1 快取讀取 feature
+        features[i] = feature_cache[pos];
     }
     return (features[0] * 64 + features[1] * 16 + features[2] * 4 + features[3]);
 }
-
 // =============================
 // GST::get_weight
-// 取得4-tuple pattern的權重
+// 獲取給定位置和偏移量的權重值
 // =============================
-float GST::get_weight(int base_pos, const int* offset, DATA& d){
-    int feature = get_feature_unknown(base_pos, offset);
+float GST::get_weight(int base_pos, const int* offset, DATA& d, const int* feature_cache){
+    // 【!!! 修改 !!!】 把 feature_cache 傳遞下去
+    int feature = get_feature_unknown(base_pos, offset, feature_cache);
+    
     int LUTidx = d.LUT_idx(d.trans[get_loc(base_pos, offset)], feature);
     float weight = 0;
+    
+    // ... (剩下的 if/else 邏輯完全不變) ...
     if(nowTurn == USER){
         if(piece_nums[2] == 1){   // E R = 1
             weight = (float)(d.LUTw_U_R1[LUTidx]) / (float)(d.LUTv_U_R1[LUTidx]);
-            // printf("U R1 using\n");
         }else if(piece_nums[1] == 1){   // U B = 1
             weight = (float)(d.LUTw_U_B1[LUTidx]) / (float)(d.LUTv_U_B1[LUTidx]);
         }else{
@@ -542,7 +550,6 @@ float GST::get_weight(int base_pos, const int* offset, DATA& d){
     }else{
         if(piece_nums[0] == 1){   // U R = 1
             weight = (float)(d.LUTw_E_R1[LUTidx]) / (float)(d.LUTv_E_R1[LUTidx]);
-            // printf("E R1 using\n");
         }else if(piece_nums[3] == 1){   // E B = 1
             weight = (float)(d.LUTw_E_B1[LUTidx]) / (float)(d.LUTv_E_B1[LUTidx]);
         }else{
@@ -550,34 +557,48 @@ float GST::get_weight(int base_pos, const int* offset, DATA& d){
         }
     }
 
-    //printf("location = %d, feature = %d, LUTidx = %d, weight = %f\n", d.trans[get_loc(base_pos, offset)], feature, LUTidx, weight);
-
     return weight;
 }
-
 // =============================
 // GST::compute_board_weight
-// 計算整個棋盤所有tuple的平均權重
+// 計算整個棋盤的權重值
 // =============================
 float GST::compute_board_weight(DATA& d){
     float total_weight = 0;
     
+    // ================== 【!!! Plan D 優化開始 !!!】 ==================
+    // 1. 在堆疊上建立一個超快的小型快取
+    int feature_cache[ROW * COL];
+
+    // 2. 遍歷 board 一次，填滿快取
+    if (nowTurn == USER) {
+        for(int pos = 0; pos < ROW * COL; pos++) {
+            feature_cache[pos] = (board[pos] < 0) ? 3 : board[pos];
+        }
+    } else { // nowTurn == ENEMY
+        for(int pos = 0; pos < ROW * COL; pos++) {
+            feature_cache[pos] = (board[pos] > 0) ? 3 : -board[pos];
+        }
+    }
+    // ================== 【!!! Plan D 優化結束 !!!】 ==================
+
     for(int pos = 0; pos < ROW * COL; pos++) {
-        int row = pos / COL;
-        int col = pos % COL;
+        // ... (row, col 已不再需要)
         
+        // 【!!! 修改 !!!】
+        // 呼叫新的 get_weight，並傳入 feature_cache
         if(is_valid_pattern(pos, offset_1x4)){
-            total_weight += get_weight(pos, offset_1x4, d);
+            total_weight += get_weight(pos, offset_1x4, d, feature_cache);
         }
         if(is_valid_pattern(pos, offset_4x1)){
-            total_weight += get_weight(pos, offset_4x1, d);
+            total_weight += get_weight(pos, offset_4x1, d, feature_cache);
         }
         if(is_valid_pattern(pos, offset_2x2)){
-            total_weight += get_weight(pos, offset_2x2, d);
+            total_weight += get_weight(pos, offset_2x2, d, feature_cache);
         }
     }
 
-    return total_weight / (float)TUPLE_NUM;
+    return total_weight / (float)TUPLE_NUM; // (保留你原本的 TUPLE_NUM)
 }
 
 // =============================
