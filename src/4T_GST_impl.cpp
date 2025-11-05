@@ -541,19 +541,25 @@ float GST::get_weight(int base_pos, const int* offset, DATA& d, const int* featu
     // ... (剩下的 if/else 邏輯完全不變) ...
     if(nowTurn == USER){
         if(piece_nums[2] == 1){   // E R = 1
-            weight = (float)(d.LUTw_U_R1[LUTidx]) / (float)(d.LUTv_U_R1[LUTidx]);
+            //weight = (float)(d.LUTw_U_R1[LUTidx]) / (float)(d.LUTv_U_R1[LUTidx]);
+            weight = d.LUTwr_U_R1[LUTidx];
         }else if(piece_nums[1] == 1){   // U B = 1
-            weight = (float)(d.LUTw_U_B1[LUTidx]) / (float)(d.LUTv_U_B1[LUTidx]);
+            //weight = (float)(d.LUTw_U_B1[LUTidx]) / (float)(d.LUTv_U_B1[LUTidx]);
+            weight = d.LUTwr_U_B1[LUTidx];
         }else{
-            weight = (float)(d.LUTw_U[LUTidx]) / (float)(d.LUTv_U[LUTidx]);
+            //weight = (float)(d.LUTw_U[LUTidx]) / (float)(d.LUTv_U[LUTidx]);
+            weight = d.LUTwr_U[LUTidx];
         }
     }else{
         if(piece_nums[0] == 1){   // U R = 1
-            weight = (float)(d.LUTw_E_R1[LUTidx]) / (float)(d.LUTv_E_R1[LUTidx]);
+            //weight = (float)(d.LUTw_E_R1[LUTidx]) / (float)(d.LUTv_E_R1[LUTidx]);
+            weight = d.LUTwr_E_R1[LUTidx];
         }else if(piece_nums[3] == 1){   // E B = 1
-            weight = (float)(d.LUTw_E_B1[LUTidx]) / (float)(d.LUTv_E_B1[LUTidx]);
+            //weight = (float)(d.LUTw_E_B1[LUTidx]) / (float)(d.LUTv_E_B1[LUTidx]);
+            weight = d.LUTwr_E_B1[LUTidx];
         }else{
-            weight = (float)(d.LUTw_E[LUTidx]) / (float)(d.LUTv_E[LUTidx]);
+            //weight = (float)(d.LUTw_E[LUTidx]) / (float)(d.LUTv_E[LUTidx]);
+            weight = d.LUTwr_E[LUTidx];
         }
     }
 
