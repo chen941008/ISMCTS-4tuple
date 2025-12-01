@@ -1,3 +1,4 @@
+#include <string>
 #include "4T_header.h"
 
 // =============================
@@ -9,17 +10,23 @@ void DATA::init_data(){
         //初始權重1/2 = 0.5
         LUTw_E[i] = 1;      // 敵方權重初始值
         LUTv_E[i] = 2;      // 敵方次數初始值
+        LUTwr_E[i] = 0.5;   // 敵方權重初始值
         LUTw_U[i] = 1;      // 我方權重初始值
         LUTv_U[i] = 2;      // 我方次數初始值
+        LUTwr_U[i] = 0.5;   // 我方權重初始值
 
         LUTw_E_R1[i] = 1;   // R1 資料集初始值
         LUTv_E_R1[i] = 2;
+        LUTwr_E_R1[i] = 0.5;   // R1 資料集初始值
         LUTw_U_R1[i] = 1;
         LUTv_U_R1[i] = 2;
+        LUTwr_U_R1[i] = 0.5;   // R1 資料集初始值
         LUTw_E_B1[i] = 1;   // B1 資料集初始值
         LUTv_E_B1[i] = 2;
+        LUTwr_E_B1[i] = 0.5;   // B1 資料集初始值
         LUTw_U_B1[i] = 1;
         LUTv_U_B1[i] = 2;
+        LUTwr_U_B1[i] = 0.5;   // B1 資料集初始值
     }
 
     int loca_num = 0;
@@ -94,7 +101,7 @@ void DATA::read_data_file(int num){       //reada the data in CSV and write to 2
             std::vector<std::string> a = _csv(line);
             LUTw_E[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
             LUTv_E[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-            LUTwr_E[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[4]);
+            LUTwr_E[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
         }
     }    
 
@@ -119,7 +126,7 @@ void DATA::read_data_file(int num){       //reada the data in CSV and write to 2
             std::vector<std::string> a = _csv(line);
             LUTw_U[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
             LUTv_U[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-            LUTwr_U[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[4]);
+            LUTwr_U[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
         }
     }
 }
@@ -146,7 +153,7 @@ void DATA::read_data_file_R1(int num){       //reada the data in CSV and write t
             std::vector<std::string> a = _csv(line);
             LUTw_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
             LUTv_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-            LUTwr_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[4]);
+            LUTwr_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
         }
     }    
 
@@ -171,7 +178,7 @@ void DATA::read_data_file_R1(int num){       //reada the data in CSV and write t
             std::vector<std::string> a = _csv(line);
             LUTw_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
             LUTv_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-            LUTwr_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[4]);
+            LUTwr_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
         }
     }
 }
@@ -198,7 +205,7 @@ void DATA::read_data_file_B1(int num){       //reada the data in CSV and write t
             std::vector<std::string> a = _csv(line);
             LUTw_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
             LUTv_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-            LUTwr_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[4]);
+            LUTwr_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
         }
     }    
 
@@ -223,7 +230,7 @@ void DATA::read_data_file_B1(int num){       //reada the data in CSV and write t
             std::vector<std::string> a = _csv(line);
             LUTw_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
             LUTv_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-            LUTwr_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[4]);
+            LUTwr_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
         }
     }
 }

@@ -14,7 +14,7 @@ public:
     // LUTw_U/LUTv_U: User 4-tuple 贏的次數/去過的次數
     unsigned long long LUTw_E[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTv_E[TUPLE_NUM * FEATURE_NUM + 1] = {0};
     unsigned long long LUTw_U[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTv_U[TUPLE_NUM * FEATURE_NUM + 1] = {0};
-    unsigned long long LUTwr_U[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTwr_E[TUPLE_NUM * FEATURE_NUM + 1] = {0};
+    float LUTwr_U[TUPLE_NUM * FEATURE_NUM + 1] = {0.0}, LUTwr_E[TUPLE_NUM * FEATURE_NUM + 1] = {0.0};
 
     // R1: 敵方紅棋剩一顆的情況 
     // B1: 我方藍棋剩一顆的情況
@@ -22,8 +22,8 @@ public:
     unsigned long long LUTw_U_R1[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTv_U_R1[TUPLE_NUM * FEATURE_NUM + 1] = {0};
     unsigned long long LUTw_E_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTv_E_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0};
     unsigned long long LUTw_U_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTv_U_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0};
-    unsigned long long LUTwr_U_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTwr_E_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0};
-    unsigned long long LUTwr_U_R1[TUPLE_NUM * FEATURE_NUM + 1] = {0}, LUTwr_E_R1[TUPLE_NUM * FEATURE_NUM + 1] = {0};
+    float LUTwr_U_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0.0}, LUTwr_E_B1[TUPLE_NUM * FEATURE_NUM + 1] = {0.0};
+    float LUTwr_U_R1[TUPLE_NUM * FEATURE_NUM + 1] = {0.0}, LUTwr_E_R1[TUPLE_NUM * FEATURE_NUM + 1] = {0.0};
 
     int trans[POS_NUM + 1] = {0};      // 棋盤4-tuple pattern位置編碼轉換表
 
