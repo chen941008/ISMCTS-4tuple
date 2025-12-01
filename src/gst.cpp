@@ -794,7 +794,7 @@ int GST::highest_weight(DATA& d){
                     corner_bonus = 1.01;
                 }
             } else if(assigned_corner == 3) {
-                current_dist = (5 - p_row) + (5 - col);
+                current_dist = (5 - p_row) + (5 - p_col);
                 if(d35 < current_dist) {
                     corner_bonus = 1.01;
                 }
