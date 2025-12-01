@@ -814,13 +814,27 @@ int GST::highest_weight(DATA& d){
     // 共用統計（max/min/argmax）與 RNG
     float max_weight = -std::numeric_limits<float>::infinity();
     float min_weight =  std::numeric_limits<float>::infinity();
-    int   best_idx   = -1;
+    std::vector<int> best_candidates; 
+    best_candidates.reserve(root_nmove);
 
     for (int i = 0; i < root_nmove; ++i) {
         const float wi = WEIGHT[i];
         if (!(wi == wi)) continue; // 跳過 NaN
-        if (wi > max_weight) { max_weight = wi; best_idx = i; }
+        if (wi > max_weight) { 
+            max_weight = wi; 
+            best_candidates.clear();      // 發現新的霸主，清空舊名單
+            best_candidates.push_back(i); // 加入新霸主
+        }
+        else if (wi == max_weight) {
+            best_candidates.push_back(i); // 平手，加入候選名單
+        }
         if (wi < min_weight) { min_weight = wi; }
+    }
+
+    int   best_idx   = -1;
+    pcg32 rng(0);
+    if (!best_candidates.empty()) {
+        best_idx = best_candidates[rng(best_candidates.size())];
     }
     if (best_idx < 0) {
         best_idx   = 0;   // 全 NaN 時的保底
