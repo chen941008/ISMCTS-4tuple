@@ -1,8 +1,6 @@
 #include "4T_DATA.hpp"
+#include "4T_GST.hpp"
 #include "4T_header.h"
-#include "ismcts.hpp"
-#include "mcts.hpp"
-
 // 選擇策略（編譯期旗標）：
 // SELECTION_MODE = 2 -> softmax 抽樣（預設）
 // SELECTION_MODE = 1 -> 線性權重抽樣 p_i = w_i / Σw（負值自動平移）
