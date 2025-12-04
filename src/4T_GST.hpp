@@ -1,3 +1,12 @@
+/**
+ * @file GST.hpp
+ * @brief Definition of the Game State (GST) class.
+ * * This class encapsulates the board representation, game rules, move generation,
+ * and state transitions. It also supports N-Tuple heuristic evaluation.
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #ifndef GST_HPP
 #define GST_HPP
 
@@ -5,66 +14,124 @@
 
 class DATA;
 
-// 共用參數
-constexpr double EXPLORATION_PARAM = 1.414;	 // UCB 探索參數
+/// @brief Global constant for UCB exploration (Standard value: sqrt(2) approx 1.414)
+constexpr double EXPLORATION_PARAM = 1.414;
 
-// 前向聲明
-class ISMCTS;  // ISMCTS 演算法類別
-class MCTS;	   // MCTS 演算法類別
+// Forward declarations
+class ISMCTS;
+class MCTS;
 
-// =============================
-// GST (Game State) 棋盤狀態類別
-// =============================
+/**
+ * @class GST
+ * @brief Represents a snapshot of the game board and status.
+ * * Manages piece positions, colors, visibility (fog of war), history, and
+ * * interface for feature extraction (4-Tuple Network).
+ */
 class GST {
-	// 允許 ISMCTS、MCTS、main() 直接存取私有成員
+	// Grant direct access to AI solvers and main loop for performance optimization
 	friend class ISMCTS;
 	friend class MCTS;
 	friend int main();
 
    private:
-	int board[ROW * COL];				  // 棋盤格子顏色（0:空, 1:紅, 2:藍, -1:敵方紅, -2:敵方藍）
-	int piece_board[ROW * COL];			  // 棋盤格子上的棋子編號（-1:無棋子, 0~15:棋子編號）
-	int pos[PIECES * 2];				  // 棋子位置（0~7:我方, 8~15:敵方）
-	int color[PIECES * 2];				  // 棋子顏色（1:紅, 2:藍, -1:敵方紅, -2:敵方藍）
-	int piece_nums[4];					  // 棋子數量（0:我紅, 1:我藍, 2:敵紅, 3:敵藍）
-	int nowTurn;						  // 當前輪到哪一方（USER/ENEMY）
-	int winner;							  // 勝利者（USER/ENEMY/-1:未分勝負）
-	bool is_escape = false;				  // 是否有逃脫
-	bool revealed[PIECES * 2] = {false};  // 棋子是否已揭示顏色
+	/// @name Board Representation
+	/// @{
+	int board[ROW * COL];  ///< Grid status (0:Empty, 1:Red, 2:Blue, -1:Enemy Red, -2:Enemy Blue)
+	int piece_board[ROW * COL];	 ///< Piece ID map (-1:None, 0~15:Piece ID)
+	int pos[PIECES * 2];		 ///< Position lookup (0~7:User, 8~15:Enemy)
+	int color[PIECES * 2];		 ///< Color lookup (1:Red, 2:Blue, -1:Enemy Red, -2:Enemy Blue)
+	int piece_nums[4];	///< Piece counts [0]:MyRed, [1]:MyBlue, [2]:EnemyRed, [3]:EnemyBlue
+	bool revealed[PIECES * 2] = {false};  ///< Fog of War: True if the piece is revealed
+	/// @}
 
-	int history[1000];	// 歷史移動紀錄
-	int n_plies;		// 已下步數
+	/// @name Game Status
+	/// @{
+	int nowTurn;			 ///< Current turn (USER / ENEMY)
+	int winner;				 ///< Game Result (USER / ENEMY / -1:None)
+	bool is_escape = false;	 ///< Flag for "Escape" victory condition
+	/// @}
 
-	int step;  // 當前步數
+	/// @name History & Tracking
+	/// @{
+	int history[1000];	///< Move history stack for Undo
+	int n_plies;		///< Total plies (half-moves) played
+	int step;			///< Current step counter (for internal tracking)
+						/// @}
 
    public:
-	// =============================
-	// 棋盤初始化、顯示、移動、判斷結束等主要方法
-	// =============================
-	void init_board();												   // 初始化棋盤
-	void print_board();												   // 印出棋盤狀態
-	int gen_all_move(int* move_arr);								   // 產生所有合法移動
-	int gen_move(int* move_arr, int piece, int location, int& count);  // 產生指定棋子的合法移動
-	void do_move(int move);											   // 執行移動
-	void undo();													   // 回復到上一步
-	bool is_over();													   // 判斷遊戲是否結束
-	bool is_revealed(int piece) const { return revealed[piece]; }	   // 查詢棋子是否已揭示
+	/// @name Core Game Logic
+	/// @{
+	/**
+	 * @brief Initializes the board to the starting state.
+	 */
+	void init_board();
 
-	// =============================
-	// 4-tuple 特徵相關方法
-	// =============================
-	bool is_valid_pattern(int base_pos, const int* offset);	 // 檢查4-tuple pattern是否合法
-	int get_loc(int base_pos, const int* offset);			 // 取得4-tuple pattern的位置編碼
+	/**
+	 * @brief Renders the current board state to the console.
+	 */
+	void print_board();
+
+	/**
+	 * @brief Generates all legal moves for the current player.
+	 * @param move_arr Output array to store moves.
+	 * @return int Number of moves generated.
+	 */
+	int gen_all_move(int* move_arr);
+
+	/**
+	 * @brief Helper: Generates moves for a specific piece.
+	 */
+	int gen_move(int* move_arr, int piece, int location, int& count);
+
+	/**
+	 * @brief Executes a move and updates the state.
+	 * @param move The encoded move integer.
+	 */
+	void do_move(int move);
+
+	/**
+	 * @brief Reverts the last move (Restores state from history).
+	 */
+	void undo();
+
+	/**
+	 * @brief Checks if the game has ended.
+	 * @return true if there is a winner or draw condition met.
+	 */
+	bool is_over();
+
+	/**
+	 * @brief Check if a specific piece is revealed.
+	 */
+	bool is_revealed(int piece) const { return revealed[piece]; }
+	/// @}
+
+	/// @name 4-Tuple Heuristics (Feature Engineering)
+	/// @{
+	bool is_valid_pattern(int base_pos, const int* offset);	 ///< Checks if pattern is within bounds
+	int get_loc(int base_pos, const int* offset);			 ///< Gets encoded location of a pattern
 	int get_feature_unknown(int base_pos, const int* offset,
-							const int* feature_cache);	// 取得4-tuple pattern的特徵編碼
-	float get_weight(int base_pos, const int* offset, DATA& d,
-					 const int* feature_cache);	 // 取得4-tuple pattern的權重
-	float compute_board_weight(DATA&);			 // 計算整個棋盤的平均權重
-	int highest_weight(DATA&);					 // 取得權重最高的合法移動
+							const int* feature_cache);	///< Extracts feature index
 
-	// =============================
-	// 取得棋子顏色、位置、設定顏色等輔助方法
-	// =============================
+	/**
+	 * @brief Retrieves the trained weight for a specific pattern.
+	 */
+	float get_weight(int base_pos, const int* offset, DATA& d, const int* feature_cache);
+
+	/**
+	 * @brief Computes the heuristic score for the entire board.
+	 * @return float Aggregated score from N-Tuple network.
+	 */
+	float compute_board_weight(DATA&);
+
+	/**
+	 * @brief Greedy Policy: Selects the move with the highest heuristic weight.
+	 */
+	int highest_weight(DATA&);
+	/// @}
+
+	/// @name Accessors & Helpers
+	/// @{
 	int get_color(int piece) const { return color[piece]; }
 	int get_pos(int piece) const { return pos[piece]; }
 	void set_color(int piece, int new_color) { color[piece] = new_color; }
@@ -72,13 +139,18 @@ class GST {
 	int get_winner() { return this->winner; }
 	int get_nplies() { return this->n_plies; }
 
-	// MCTS 作弊用：取得所有棋子顏色
+	// Direct access for MCTS (Oracle/Cheating mode)
 	const int* get_full_colors() const { return color; }
-	// ISMCTS 查詢revealed狀態
+
+	// Direct access for ISMCTS (Fog of War handling)
 	const bool* get_revealed() const { return revealed; }
 
-	// server 端用：根據字串設定棋盤
+	/**
+	 * @brief Server Utility: Sets the board state from a string.
+	 * @param position String representation of the board state.
+	 */
 	void set_board(char* position);
+	/// @}
 };
 
-#endif
+#endif	// GST_HPP

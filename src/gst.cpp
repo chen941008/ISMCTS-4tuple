@@ -1,3 +1,11 @@
+/**
+ * @file gst.cpp
+ * @brief Implementation of Game State (GST) logic and Main Entry Point.
+ * * Contains board logic, move generation, N-Tuple heuristics, and the main simulation loop.
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #define _CRT_RAND_S
 
 #include "gst.hpp"
@@ -6,11 +14,13 @@
 #include "ismcts.hpp"
 #include "mcts.hpp"
 
-// 選擇策略（編譯期旗標）：
-// SELECTION_MODE = 2 -> softmax 抽樣（預設）
-// SELECTION_MODE = 1 -> 線性權重抽樣 p_i = w_i / Σw（負值自動平移）
-// SELECTION_MODE = 0 -> 直接取最高分（argmax）
-// 相容舊旗標：-DUSE_SOFTMAX_SELECTION=1/0 分別對應 softmax/線性
+// ==========================================
+// Selection Strategy Configuration
+// ==========================================
+// SELECTION_MODE = 2 -> Softmax Sampling (Default)
+// SELECTION_MODE = 1 -> Linear Weight Sampling (p_i = w_i / Σw)
+// SELECTION_MODE = 0 -> Argmax (Greedy)
+// Compatibility for old flags: -DUSE_SOFTMAX_SELECTION=1/0 maps to 2/1
 #ifndef SELECTION_MODE
 #ifdef USE_SOFTMAX_SELECTION
 #if USE_SOFTMAX_SELECTION
@@ -31,42 +41,60 @@
 #pragma message("Compiling with argmax selection")
 #endif
 
-// 放在函式內最上面（或檔案區域）：一次播種、整段重用
+// ==========================================
+// Random Number Generator
+// ==========================================
+// Thread-local PCG32 RNG: Seeded once, reused throughout the thread's life
 static thread_local pcg32 rng(std::random_device{}());
-// 產生 u ∈ [0,1)
+
+// Helper lambda: Generates double u in [0, 1)
 auto next_u01 = []() {
 	return static_cast<double>(rng()) / (static_cast<double>(pcg32::max()) + 1.0);
 };
 
-// =============================
-// 靜態變數：棋子、方向、初始位置、pattern offset
-// =============================
-static std::map<char, int> piece_index = {{'A', 0},	 {'B', 1},	{'C', 2},  {'D', 3},  {'E', 4},
-										  {'F', 5},	 {'G', 6},	{'H', 7},  {'a', 8},  {'b', 9},
-										  {'c', 10}, {'d', 11}, {'e', 12}, {'f', 13}, {'g', 14},
-										  {'h', 15}};  // 棋子字元對應編號
-static std::map<char, int> dir_index = {
-	{'N', 0}, {'W', 1}, {'E', 2}, {'S', 3}};  // 方向字元對應編號
-static std::map<int, char> print_piece = {{0, 'A'},	 {1, 'B'},	{2, 'C'},  {3, 'D'},  {4, 'E'},
-										  {5, 'F'},	 {6, 'G'},	{7, 'H'},  {8, 'a'},  {9, 'b'},
-										  {10, 'c'}, {11, 'd'}, {12, 'e'}, {13, 'f'}, {14, 'g'},
-										  {15, 'h'}};  // 棋子編號對應字元
-static const int init_pos[2][PIECES] = {{25, 26, 27, 28, 31, 32, 33, 34},
-										{10, 9, 8, 7, 4, 3, 2, 1}};	 // 初始位置
-static const int dir_val[4] = {-COL, -1, 1, COL};					 // 方向偏移量
-static const int offset_1x4[4] = {0, 1, 2, 3};						 // 橫向 1x4 pattern
-static const int offset_2x2[4] = {0, 1, 6, 7};						 // 2x2 pattern
-static const int offset_4x1[4] = {0, 6, 12, 18};					 // 縱向 4x1 pattern
+// ==========================================
+// Static Lookups & Constants
+// ==========================================
+// Character map for piece indexing
+static std::map<char, int> piece_index = {
+	{'A', 0}, {'B', 1}, {'C', 2},  {'D', 3},  {'E', 4},	 {'F', 5},	{'G', 6},  {'H', 7},
+	{'a', 8}, {'b', 9}, {'c', 10}, {'d', 11}, {'e', 12}, {'f', 13}, {'g', 14}, {'h', 15}};
 
-// =============================
-// GST::init_board
-// 初始化棋盤、隨機分配紅棋
-// =============================
+// Character map for directions
+static std::map<char, int> dir_index = {{'N', 0}, {'W', 1}, {'E', 2}, {'S', 3}};
+
+// Index map for printing characters
+static std::map<int, char> print_piece = {
+	{0, 'A'}, {1, 'B'}, {2, 'C'},  {3, 'D'},  {4, 'E'},	 {5, 'F'},	{6, 'G'},  {7, 'H'},
+	{8, 'a'}, {9, 'b'}, {10, 'c'}, {11, 'd'}, {12, 'e'}, {13, 'f'}, {14, 'g'}, {15, 'h'}};
+
+// Initial Board Positions [Player][PieceIndex]
+static const int init_pos[2][PIECES] = {
+	{25, 26, 27, 28, 31, 32, 33, 34},  // Player 0 (User)
+	{10, 9, 8, 7, 4, 3, 2, 1}		   // Player 1 (Enemy)
+};
+
+// Direction Offsets: {N, W, E, S}
+static const int dir_val[4] = {-COL, -1, 1, COL};
+
+// N-Tuple Pattern Offsets
+static const int offset_1x4[4] = {0, 1, 2, 3};	  // Horizontal 1x4
+static const int offset_2x2[4] = {0, 1, 6, 7};	  // Square 2x2
+static const int offset_4x1[4] = {0, 6, 12, 18};  // Vertical 4x1
+
+// ==========================================
+// GST Implementation
+// ==========================================
+
+/**
+ * @brief Initializes the board and randomly assigns Red pieces.
+ */
 void GST::init_board() {
 	/*
+		Board Layout Reference:
 		A  B  C  D  E  F  G  H  a  b  c  d  e  f  g  h
-		0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15  <-piece index, used in pos and color
-	   25 26 27 28 31 32 33 34 10  9  8  7  4  3  2  1  <-position on board
+		0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15  <- piece index
+	   25 26 27 28 31 32 33 34 10  9  8  7  4  3  2  1  <- board position
 	*/
 
 	memset(board, 0, sizeof(board));
@@ -74,7 +102,9 @@ void GST::init_board() {
 	memset(revealed, false, sizeof(revealed));
 	for (int i = 0; i < ROW * COL; i++) piece_board[i] = -1;
 	for (int i = 0; i < 4; i++) piece_nums[i] = 4;
-	for (int i = 0; i < PIECES; i++) {	// set color
+
+	// Default all pieces to BLUE first
+	for (int i = 0; i < PIECES; i++) {
 		color[i] = BLUE;
 		color[i + 8] = -BLUE;
 	}
@@ -83,9 +113,9 @@ void GST::init_board() {
 	n_plies = 0;
 	is_escape = false;
 
-	// random set red pieces
-	int red_num = 0;	 // 現在有幾個紅棋
-	bool red_or_not[8];	 // 哪個位置已經是紅棋了
+	// Randomly assign RED pieces for Player 0 (User)
+	int red_num = 0;
+	bool red_or_not[8];
 	std::fill(std::begin(red_or_not), std::end(red_or_not), false);
 	char red[4];
 	char red2[4];
@@ -99,6 +129,7 @@ void GST::init_board() {
 		}
 	}
 
+	// Randomly assign RED pieces for Player 1 (Enemy)
 	red_num = 0;
 	std::fill(std::begin(red_or_not), std::end(red_or_not), false);
 	while (red_num != 4) {
@@ -110,30 +141,33 @@ void GST::init_board() {
 		}
 	}
 
+	// Apply colors and reveal flags
 	for (int i = 0; i < 4; i++) {
 		color[piece_index[red[i]]] = RED;
 		color[piece_index[red2[i]]] = -RED;
 
+		// Reveal logic for enemy red pieces (if applicable rules)
 		if (piece_index[red2[i]] >= PIECES) {
 			revealed[piece_index[red2[i]]] = true;
 		}
 	}
+	// Reveal all enemy blue pieces by rule? (Legacy logic maintained)
 	for (int i = PIECES; i < PIECES * 2; i++) {
 		if (color[i] == -BLUE) {
 			revealed[i] = true;
 		}
 	}
 
-	// set all pieces position and board
+	// Set pieces on the board
 	int offset = 0;
 	for (int player = 0; player < 2; player++) {
 		for (int i = 0; i < PIECES; i++) {
-			board[init_pos[player][i]] =
-				color[i + offset];	// board: record the color in this location(0~3)
-			piece_board[init_pos[player][i]] =
-				i +
-				offset;	 // piece_booard: write chess number in board, chess number(0~15)/ space(-1)
-			pos[i + offset] = init_pos[player][i];	// pos: record the chess index(0~15)
+			// board: records color type (1, 2, -1, -2)
+			board[init_pos[player][i]] = color[i + offset];
+			// piece_board: records piece ID (0~15)
+			piece_board[init_pos[player][i]] = i + offset;
+			// pos: records location index (0~35)
+			pos[i + offset] = init_pos[player][i];
 		}
 		offset += 8;
 	}
@@ -141,19 +175,18 @@ void GST::init_board() {
 	return;
 }
 
-// =============================
-// GST::print_board
-// 印出棋盤、剩餘棋子、被吃棋子
-// =============================
+/**
+ * @brief Prints the board, remaining pieces, and captured pieces to console.
+ */
 void GST::print_board() {
 	for (int i = 0; i < ROW; i++) {
 		for (int j = 0; j < COL; j++) {
 			if (piece_board[i * ROW + j] != -1)
 				printf("%4c", print_piece[piece_board[i * ROW + j]]);
 			else if (i == 0 && j == 0)
-				printf("%4c", '<');
+				printf("%4c", '<');	 // Entry point
 			else if (i == 0 && j == COL - 1)
-				printf("%4c", '>');
+				printf("%4c", '>');	 // Exit point
 			else
 				printf("%4c", '-');
 		}
@@ -172,43 +205,45 @@ void GST::print_board() {
 	printf("\n");
 }
 
-// =============================
-// GST::gen_move
-// 產生指定棋子的所有合法移動
-// =============================
-int GST::gen_move(int* move_arr, int piece, int location,
-				  int& count) {	 // generate the possible step
+/**
+ * @brief Generates valid moves for a single piece.
+ */
+int GST::gen_move(int* move_arr, int piece, int location, int& count) {
 	int row = location / ROW;
 	int col = location % COL;
 
 	if (nowTurn == USER) {
-		if (row != 0 && board[location - 6] <= 0) move_arr[count++] = piece << 4;			 // up
-		if (row != ROW - 1 && board[location + 6] <= 0) move_arr[count++] = piece << 4 | 3;	 // down
-		if (col != 0 && board[location - 1] <= 0) move_arr[count++] = piece << 4 | 1;		 // left
+		// Normal moves: Up, Down, Left, Right
+		if (row != 0 && board[location - 6] <= 0) move_arr[count++] = piece << 4;			 // Up
+		if (row != ROW - 1 && board[location + 6] <= 0) move_arr[count++] = piece << 4 | 3;	 // Down
+		if (col != 0 && board[location - 1] <= 0) move_arr[count++] = piece << 4 | 1;		 // Left
 		if (col != COL - 1 && board[location + 1] <= 0)
-			move_arr[count++] = piece << 4 | 2;	 // right
-		if (color[piece] == BLUE) {				 // exit move
-			if (location == 0) move_arr[count++] = piece << 4 | 1;
-			if (location == 5) move_arr[count++] = piece << 4 | 2;
+			move_arr[count++] = piece << 4 | 2;	 // Right
+
+		// Escape moves (Blue pieces only)
+		if (color[piece] == BLUE) {
+			if (location == 0) move_arr[count++] = piece << 4 | 1;	// Exit at Top-Left
+			if (location == 5) move_arr[count++] = piece << 4 | 2;	// Exit at Top-Right
 		}
-	} else {
+	} else {  // ENEMY Turn
 		if (row != 0 && board[location - 6] >= 0) move_arr[count++] = piece << 4;
 		if (row != ROW - 1 && board[location + 6] >= 0) move_arr[count++] = piece << 4 | 3;
 		if (col != 0 && board[location - 1] >= 0) move_arr[count++] = piece << 4 | 1;
 		if (col != COL - 1 && board[location + 1] >= 0) move_arr[count++] = piece << 4 | 2;
+
+		// Escape moves (Blue pieces only)
 		if (color[piece] == -BLUE) {
-			if (location == 30) move_arr[count++] = piece << 4 | 1;
-			if (location == 35) move_arr[count++] = piece << 4 | 2;
+			if (location == 30) move_arr[count++] = piece << 4 | 1;	 // Exit at Bottom-Left
+			if (location == 35) move_arr[count++] = piece << 4 | 2;	 // Exit at Bottom-Right
 		}
 	}
-	return count;  // the number of possible step
+	return count;
 }
 
-// =============================
-// GST::gen_all_move
-// 產生所有合法移動
-// =============================
-int GST::gen_all_move(int* move_arr) {	// gernerate all posibility of chess step
+/**
+ * @brief Generates all possible legal moves for the current player.
+ */
+int GST::gen_all_move(int* move_arr) {
 	int count = 0;
 	int offset = nowTurn == ENEMY ? PIECES : 0;
 	int* nowTurn_pos = pos + offset;
@@ -218,16 +253,13 @@ int GST::gen_all_move(int* move_arr) {	// gernerate all posibility of chess step
 			gen_move(move_arr, i + offset, nowTurn_pos[i], count);
 		}
 	}
-
 	return count;
 }
 
-// =============================
-// check_win_move
-// 判斷移動是否可直接獲勝
-// =============================
-bool check_win_move(int location,
-					int dir) {	// if chess is in corner, check next move will win or not
+/**
+ * @brief Helper: Checks if a move results in an immediate win (Escape).
+ */
+bool check_win_move(int location, int dir) {
 	if (location == 0 || location == 30)
 		return dir == 1 ? true : false;
 	else if (location == 5 || location == 35)
@@ -235,14 +267,14 @@ bool check_win_move(int location,
 	return false;
 }
 
-// =============================
-// GST::do_move
-// 執行移動，更新棋盤、吃棋、勝負判斷
-// =============================
-void GST::do_move(int move) {  // move chess
+/**
+ * @brief Executes a move, updates board, handles captures, and checks state.
+ */
+void GST::do_move(int move) {
 	int piece = move >> 4;
 	int direction = move & 0xf;
 
+	// Check for Escape Victory
 	if (abs(color[piece]) == BLUE) {
 		if (check_win_move(pos[piece], direction)) {
 			winner = nowTurn;
@@ -252,30 +284,35 @@ void GST::do_move(int move) {  // move chess
 			return;
 		}
 	}
-	if (n_plies == 1000) {
+
+	// Safety break for infinite loops
+	if (n_plies == MAX_PLIES) {
 		fprintf(stderr, "cannot do anymore moves\n");
 		exit(1);
 	}
 
-	int dst = pos[piece] + dir_val[direction];
 	// dst: the chess's location after move / pos: the location of chess / dir_val: up down left
 	// right
+	int dst = pos[piece] + dir_val[direction];
 
-	if (board[dst] < 0) {			 // Enemy's color
-		pos[piece_board[dst]] = -1;	 // chess is eaten
-		move |= piece_board[dst] << 8;
+	// Handle Captures
+	if (board[dst] < 0) {				// Occupied by Enemy
+		pos[piece_board[dst]] = -1;		// Piece eaten
+		move |= piece_board[dst] << 8;	// Record eaten piece in move (for undo)
 		revealed[piece_board[dst]] = true;
+
+		// Update piece counts
 		if (color[piece_board[dst]] == -RED)
-			piece_nums[2] -= 1;	 // check the remain color of red & blue chess
+			piece_nums[2] -= 1;
 		else if (color[piece_board[dst]] == -BLUE)
 			piece_nums[3] -= 1;
 		else if (color[piece_board[dst]] == -UNKNOWN) {
-		}  // 先什麼都不做
-		else {
+			// Do nothing for unknown
+		} else {
 			fprintf(stderr, "do_move error, eaten color wrong!\n");
 			exit(1);
 		}
-	} else if (board[dst] > 0) {  // User's color
+	} else if (board[dst] > 0) {  // Occupied by User
 		pos[piece_board[dst]] = -1;
 		move |= piece_board[dst] << 8;
 		if (color[piece_board[dst]] == RED)
@@ -283,15 +320,17 @@ void GST::do_move(int move) {  // move chess
 		else if (color[piece_board[dst]] == BLUE)
 			piece_nums[1] -= 1;
 		else if (color[piece_board[dst]] == UNKNOWN) {
-		}  // 先什麼都不做
-		else {
+			// Do nothing
+		} else {
 			fprintf(stderr, "do_move error, eaten color wrong!\n");
 			exit(1);
 		}
 	} else {
+		// No capture, mark as empty move
 		move |= 0x1000;
 	}
 
+	// Update Board State
 	board[pos[piece]] = 0;		   // set 0 at the location which stay before => space: color = 0
 	piece_board[pos[piece]] = -1;  // set 0 at the location which stay before => space: no chess
 	board[dst] = color[piece];	   // color the chess color at the location after move
@@ -301,43 +340,45 @@ void GST::do_move(int move) {  // move chess
 	nowTurn ^= 1;  // change player
 }
 
-// =============================
-// GST::undo
-// 回復到上一步
-// =============================
-void GST::undo() {	// return to last move(use to return status of random move)
+/**
+ * @brief Undoes the last move (restores board state).
+ */
+void GST::undo() {
 	if (winner != -1) winner = -1;
 
 	if (n_plies == 0) {
 		fprintf(stderr, "no history\n");
 		exit(1);
 	}
-	nowTurn ^= 1;  // change player
+	nowTurn ^= 1;  // Switch back to previous player
 
 	int move = history[--n_plies];
 	int check_eaten = move >> 12;
 	int eaten_piece = (move & 0xfff) >> 8;
 	int piece = (move & 0xff) >> 4;
 	int direction = move & 0xf;
-	int src = pos[piece] - dir_val[direction];	// location of last move
+	int src = pos[piece] - dir_val[direction];	// Original location
 
 	if (is_escape) {
 		is_escape = false;
 		return;
 	}
 
+	// Restore captured piece if any
 	if (check_eaten != 0x1) {
 		board[pos[piece]] = color[eaten_piece];
 		piece_board[pos[piece]] = eaten_piece;
 		pos[eaten_piece] = pos[piece];
+
+		// Restore piece counts
 		if (nowTurn == USER) {
 			if (color[eaten_piece] == -RED)
 				piece_nums[2] += 1;
 			else if (color[eaten_piece] == -BLUE)
 				piece_nums[3] += 1;
 			else if (color[eaten_piece] == -UNKNOWN) {
-			}  // 先什麼都不做
-			else {
+				// Do nothing
+			} else {
 				fprintf(stderr, "undo error, eaten color wrong!");
 				exit(1);
 			}
@@ -347,33 +388,36 @@ void GST::undo() {	// return to last move(use to return status of random move)
 			else if (color[eaten_piece] == BLUE)
 				piece_nums[1] += 1;
 			else if (color[eaten_piece] == UNKNOWN) {
-			}  // 先什麼都不做
-			else {
+				// Do nothing
+			} else {
 				fprintf(stderr, "undo error, eaten color wrong!");
 				exit(1);
 			}
 		}
 	} else {
+		// Just clear current pos
 		board[pos[piece]] = 0;
 		piece_board[pos[piece]] = -1;
 	}
+
+	// Move piece back to src
 	board[src] = color[piece];
 	piece_board[src] = piece;
 	pos[piece] = src;
 }
 
-// =============================
-// GST::is_over
-// 判斷遊戲是否結束
-// =============================
-bool GST::is_over() {  // game end or not => the number of remain chess color
+/**
+ * @brief Checks if the game is over.
+ */
+bool GST::is_over() {
 	if (n_plies >= 200) {
-		winner = -2;  // -2表示平局
+		winner = -2;  // Draw (Rule: 200 plies limit)
 		return true;
 	}
 	if (winner != -1)
 		return true;
 	else {
+		// Victory Condition: Eliminate all opponent's pieces of a specific color
 		if (piece_nums[0] == 0 || piece_nums[3] == 0) {
 			winner = USER;
 			return true;
@@ -385,70 +429,25 @@ bool GST::is_over() {  // game end or not => the number of remain chess color
 	return false;
 }
 
-// int move_index = 0;
+// ==========================================
+// Statistics & Utilities
+// ==========================================
 
-// int flat_mc(GST& game, int simu_times){
-//     int root_nmove, n_move;
-//     int root_moves[MAX_MOVES];
-//     int moves[MAX_MOVES];
-//     int wins, count;
-//     int maxWins = -1;
-//     int move_index = 0;
-
-//     root_nmove = game.gen_all_move(root_moves);
-//     for(int m=0; m<root_nmove; m++){
-//         game.do_move(root_moves[m]);
-//         //random simu
-//         wins = 0;
-//         for(int t=0; t<simu_times; t++){
-//             count = 0;
-//             while(!game.is_over()){
-//                 n_move = game.gen_all_move(moves);
-//                 int x = rand();
-//                 game.do_move(moves[x%n_move]);
-//                 count++;
-//             }
-
-//             if(game.get_winner() == ENEMY){
-//                 wins++;
-//             }
-
-//             for(int c=0; c<count; c++){
-//                 game.undo();
-//             }
-//         }
-//         if(wins > maxWins){
-//             maxWins = wins;
-//             move_index = m;
-//         }
-//         printf("move %d, win rate = %f\n", m, (float)wins/(float)simu_times);
-//         game.undo();
-//     }
-//     return root_moves[move_index];
-// }
-
-// 使用ismcts替代flat_mc函數
-// int ismcts_move(GST& game, int simu_times) {
-//     ISMCTS ismcts(simu_times);
-//     return ismcts.findBestMove(game);
-// }
-
-// 新增統計結構
 struct GameStats {
 	int total_games;
-	// ISMCTS (Player 1) 統計
+	// ISMCTS (Player 1) Stats
 	int ismcts_wins;
 	int ismcts_escape;
 	int ismcts_enemy_red;
 	int ismcts_enemy_blue;
 	int ismcts_total_steps;
 	double ismcts_total_times;
-	// MCTS (Player 2) 統計
+	// MCTS (Player 2) Stats
 	int mcts_wins;
 	int mcts_escape;
 	int mcts_enemy_red;
 	int mcts_enemy_blue;
-	// 平局
+	// Draws
 	int draws;
 
 	GameStats()
@@ -504,10 +503,14 @@ void print_progress_bar(int current, int total) {
 	std::cout << "] " << int(progress * 100.0) << "% (" << current << "/" << total << ")"
 			  << std::flush;
 }
-// =============================
-// GST::is_valid_pattern
-// 檢查給定的 pattern 偏移量是否有效
-// =============================
+
+// ==========================================
+// N-Tuple Heuristic Implementation
+// ==========================================
+
+/**
+ * @brief Checks if a pattern is valid within board boundaries.
+ */
 bool GST::is_valid_pattern(int base_pos, const int* offset) {
 	int base_row = base_pos / COL;
 	int base_col = base_pos % COL;
@@ -522,10 +525,10 @@ bool GST::is_valid_pattern(int base_pos, const int* offset) {
 
 	return true;
 }
-// =============================
-// GST::get_loc
-// 取得給定位置和偏移量的唯一編碼
-// =============================
+
+/**
+ * @brief Encodes the location of a pattern.
+ */
 int GST::get_loc(int base_pos, const int* offset) {
 	int position[4];
 	for (int i = 0; i < 4; i++) {
@@ -533,79 +536,63 @@ int GST::get_loc(int base_pos, const int* offset) {
 	}
 	return (position[0] * 36 * 36 * 36 + position[1] * 36 * 36 + position[2] * 36 + position[3]);
 }
-// =============================
-// GST::get_feature_unknown
-// 獲取給定位置和偏移量的特徵編碼
-// =============================
+
+/**
+ * @brief Extracts feature encoding from the board.
+ * * Uses feature_cache for optimization.
+ */
 int GST::get_feature_unknown(int base_pos, const int* offset, const int* feature_cache) {
 	int features[4];
 	for (int i = 0; i < 4; i++) {
 		int pos = base_pos + offset[i];
 
-		// 【!!! 舊的程式碼 (已刪除) !!!】
-		// if(nowTurn == USER){
-		//     features[i] = (board[pos] < 0) ? 3 : board[pos];
-		// }
-		// else{
-		//     features[i] = (board[pos] > 0) ? 3 : -board[pos];
-		// }
-
-		// 【!!! 新的程式碼 !!!】
-		// 直接從 L1 快取讀取 feature
 		features[i] = feature_cache[pos];
 	}
 	return (features[0] * 64 + features[1] * 16 + features[2] * 4 + features[3]);
 }
-// =============================
-// GST::get_weight
-// 獲取給定位置和偏移量的權重值
-// =============================
+
+/**
+ * @brief Retrieves heuristic weight for a specific pattern.
+ */
 float GST::get_weight(int base_pos, const int* offset, DATA& d, const int* feature_cache) {
-	// 【!!! 修改 !!!】 把 feature_cache 傳遞下去
+	// Pass feature_cache down to feature extraction
 	int feature = get_feature_unknown(base_pos, offset, feature_cache);
 
 	int LUTidx = d.LUT_idx(d.trans[get_loc(base_pos, offset)], feature);
 	float weight = 0;
 
-	// ... (剩下的 if/else 邏輯完全不變) ...
+	// LUT selection based on remaining pieces
 	if (nowTurn == USER) {
-		if (piece_nums[2] == 1) {  // E R = 1
-			// weight = (float)(d.LUTw_U_R1[LUTidx]) / (float)(d.LUTv_U_R1[LUTidx]);
+		if (piece_nums[2] == 1) {  // Enemy Red = 1
 			weight = d.LUTwr_U_R1[LUTidx];
-		} else if (piece_nums[1] == 1) {  // U B = 1
-			// weight = (float)(d.LUTw_U_B1[LUTidx]) / (float)(d.LUTv_U_B1[LUTidx]);
+		} else if (piece_nums[1] == 1) {  // User Blue = 1
 			weight = d.LUTwr_U_B1[LUTidx];
 		} else {
-			// weight = (float)(d.LUTw_U[LUTidx]) / (float)(d.LUTv_U[LUTidx]);
 			weight = d.LUTwr_U[LUTidx];
 		}
 	} else {
-		if (piece_nums[0] == 1) {  // U R = 1
-			// weight = (float)(d.LUTw_E_R1[LUTidx]) / (float)(d.LUTv_E_R1[LUTidx]);
+		if (piece_nums[0] == 1) {  // User Red = 1
 			weight = d.LUTwr_E_R1[LUTidx];
-		} else if (piece_nums[3] == 1) {  // E B = 1
-			// weight = (float)(d.LUTw_E_B1[LUTidx]) / (float)(d.LUTv_E_B1[LUTidx]);
+		} else if (piece_nums[3] == 1) {  // Enemy Blue = 1
 			weight = d.LUTwr_E_B1[LUTidx];
 		} else {
-			// weight = (float)(d.LUTw_E[LUTidx]) / (float)(d.LUTv_E[LUTidx]);
 			weight = d.LUTwr_E[LUTidx];
 		}
 	}
 
 	return weight;
 }
-// =============================
-// GST::compute_board_weight
-// 計算整個棋盤的權重值
-// =============================
+
+/**
+ * @brief Computes the aggregated weight of the entire board.
+ */
 float GST::compute_board_weight(DATA& d) {
 	float total_weight = 0;
 
-	// ================== 【!!! Plan D 優化開始 !!!】 ==================
-	// 1. 在堆疊上建立一個超快的小型快取
+	// 1. Create a fast L1 cache on stack
 	int feature_cache[ROW * COL];
 
-	// 2. 遍歷 board 一次，填滿快取
+	// 2. Iterate board once to fill cache
 	if (nowTurn == USER) {
 		for (int pos = 0; pos < ROW * COL; pos++) {
 			feature_cache[pos] = (board[pos] < 0) ? 3 : board[pos];
@@ -615,13 +602,8 @@ float GST::compute_board_weight(DATA& d) {
 			feature_cache[pos] = (board[pos] > 0) ? 3 : -board[pos];
 		}
 	}
-	// ================== 【!!! Plan D 優化結束 !!!】 ==================
 
 	for (int pos = 0; pos < ROW * COL; pos++) {
-		// ... (row, col 已不再需要)
-
-		// 【!!! 修改 !!!】
-		// 呼叫新的 get_weight，並傳入 feature_cache
 		if (is_valid_pattern(pos, offset_1x4)) {
 			total_weight += get_weight(pos, offset_1x4, d, feature_cache);
 		}
@@ -633,39 +615,36 @@ float GST::compute_board_weight(DATA& d) {
 		}
 	}
 
-	return total_weight / (float)TUPLE_NUM;	 // (保留你原本的 TUPLE_NUM)
+	return total_weight / (float)TUPLE_NUM;
 }
-// =============================
-// GST::highest_weight
-// 找出權重最高的移動
-// =============================
+
+/**
+ * @brief Selects the highest weighted move (Greedy Policy).
+ * * Includes optimizations for corner bonuses and pre-computation.
+ */
 int GST::highest_weight(DATA& d) {
 	float WEIGHT[MAX_MOVES] = {0};
 	int root_nmove;
 	int root_moves[MAX_MOVES];
 	root_nmove = gen_all_move(root_moves);
 
-	// ================== 【優化：角落獎勵計算移至迴圈外】 ==================
-	// 這整段邏輯 (std::vector, std::sort, 分配任務) 在 highest_weight 函式中
-	// 只需要計算 "一次"，而不是 "每評估一步棋m" 都重算一次。
-
-	// 存儲每個棋子到各角落的距離
-	std::vector<std::tuple<int, int, int>> pieces_distances;  // (棋子索引, 角落編號, 距離)
+	// Store distances from pieces to corners
+	std::vector<std::tuple<int, int, int>> pieces_distances;  // (piece_idx, corner_id, distance)
 
 	if (nowTurn == USER) {
-		// 計算所有棋子到各角落的距離
+		// Calculate for all User pieces
 		for (int i = 0; i < PIECES; i++) {
 			if (pos[i] != -1) {
 				int p_row = pos[i] / 6;
 				int p_col = pos[i] % 6;
 
-				// 計算這個棋子到四個角落的距離
+				// Manhattan distance to 4 corners
 				int dist_to_0 = p_row + p_col;
 				int dist_to_5 = p_row + (5 - p_col);
 				int dist_to_30 = (5 - p_row) + p_col;
 				int dist_to_35 = (5 - p_row) + (5 - p_col);
+				
 
-				// 添加所有棋子-角落距離組合
 				pieces_distances.push_back(std::make_tuple(i, 0, dist_to_0));
 				pieces_distances.push_back(std::make_tuple(i, 1, dist_to_5));
 				pieces_distances.push_back(std::make_tuple(i, 2, dist_to_30));
@@ -673,18 +652,17 @@ int GST::highest_weight(DATA& d) {
 			}
 		}
 	} else if (nowTurn == ENEMY) {
+		// Calculate for all Enemy pieces
 		for (int i = PIECES; i < PIECES * 2; i++) {
 			if (pos[i] != -1) {
 				int p_row = pos[i] / 6;
 				int p_col = pos[i] % 6;
 
-				// 計算这个棋子到四個角落的距離
 				int dist_to_0 = p_row + p_col;
 				int dist_to_5 = p_row + (5 - p_col);
 				int dist_to_30 = (5 - p_row) + p_col;
 				int dist_to_35 = (5 - p_row) + (5 - p_col);
 
-				// 添加所有棋子-角落距離組合
 				pieces_distances.push_back(std::make_tuple(i, 0, dist_to_0));
 				pieces_distances.push_back(std::make_tuple(i, 1, dist_to_5));
 				pieces_distances.push_back(std::make_tuple(i, 2, dist_to_30));
@@ -693,22 +671,22 @@ int GST::highest_weight(DATA& d) {
 		}
 	}
 
-	// 按距離排序所有棋子-角落組合
+	// Sort all piece-corner tuples by distance
 	std::sort(pieces_distances.begin(), pieces_distances.end(),
 			  [](const std::tuple<int, int, int>& a, const std::tuple<int, int, int>& b) {
 				  return std::get<2>(a) < std::get<2>(b);
 			  });
 
-	// 已分配的棋子和角落
+	// Tracking assigned pieces and corners
 	bool piece_assigned[PIECES * 2];
 	bool corner_assigned[4];
-	int assigned_corner_for_piece[PIECES * 2];	// 關鍵：[棋子編號] -> 該去的角落
+	int assigned_corner_for_piece[PIECES * 2];	// Map: [PieceID] -> AssignedCornerID
 
 	memset(piece_assigned, false, sizeof(piece_assigned));
 	memset(corner_assigned, false, sizeof(corner_assigned));
 	memset(assigned_corner_for_piece, -1, sizeof(assigned_corner_for_piece));
 
-	// 按距離分配棋子到角落
+	// Assign closest pieces to corners
 	for (const auto& tuple : pieces_distances) {
 		int p_idx = std::get<0>(tuple);
 		int corner = std::get<1>(tuple);
@@ -716,14 +694,13 @@ int GST::highest_weight(DATA& d) {
 		if (!piece_assigned[p_idx] && !corner_assigned[corner]) {
 			piece_assigned[p_idx] = true;
 			corner_assigned[corner] = true;
-			assigned_corner_for_piece[p_idx] = corner;	// 把任務記下來
+			assigned_corner_for_piece[p_idx] = corner;	// Memorize task
 		}
 
 		if (corner_assigned[0] && corner_assigned[1] && corner_assigned[2] && corner_assigned[3]) {
 			break;
 		}
 	}
-	// ================== 【優化：結束】 ==================
 
 	for (int m = 0; m < root_nmove; m++) {
 		int move_index = m;
@@ -732,8 +709,8 @@ int GST::highest_weight(DATA& d) {
 		int src = pos[piece];
 		int dst = src + dir_val[direction];	 // the position after move
 
-		if (pos[piece] == 0 && direction == 1 && nowTurn == USER &&
-			board[0] == BLUE) {	 // if check_win_move() = true, won't move and return directly
+		// Immediate win checks or special heuristics
+		if (pos[piece] == 0 && direction == 1 && nowTurn == USER && board[0] == BLUE) {
 			WEIGHT[move_index] = 1;
 		} else if (pos[piece] == 5 && direction == 2 && nowTurn == USER && board[5] == BLUE) {
 			WEIGHT[move_index] = 1;
@@ -760,8 +737,11 @@ int GST::highest_weight(DATA& d) {
 				WEIGHT[move_index] = 1;
 			}
 		} else {
-			int tmp_color[PIECES * 2];	// 去除上帝視角
+			// General case: Simulate move and evaluate board
+			int tmp_color[PIECES * 2];	// Backup colors (Remove God View)
 			for (int i = 0; i < PIECES * 2; i++) tmp_color[i] = color[i];
+
+			// Mask hidden info
 			if (nowTurn == USER)
 				for (int i = PIECES; i < PIECES * 2; i++) color[i] = -UNKNOWN;
 			else
@@ -775,53 +755,48 @@ int GST::highest_weight(DATA& d) {
 			nowTurn ^= 1;
 			undo();
 
+			// Restore colors
 			for (int i = 0; i < PIECES * 2; i++) color[i] = tmp_color[i];
 		}
 
-		// 調參數時間
+		// Apply Corner Heuristics
 		int row = dst / 6;
 		int col = dst % 6;
 
-		// 計算目標位置到各角落的距離
-		int d0 = row + col;				  // 到 (0,0) 的距離
-		int d5 = row + (5 - col);		  // 到 (0,5) 的距離
-		int d30 = (5 - row) + col;		  // 到 (5,0) 的距離
-		int d35 = (5 - row) + (5 - col);  // 到 (5,5) 的距離
+		int d0 = row + col;
+		int d5 = row + (5 - col);
+		int d30 = (5 - row) + col;
+		int d35 = (5 - row) + (5 - col);
 
-		// 【!!!】 原本在這裡的 std::vector, std::sort, for... 都被移到上面了
-
-		// 角落獎勵係數
 		float corner_bonus = 1.0;
 
-		// 檢查當前棋子是否被分配到某個角落
-		// 這裡 "使用" 在迴圈外算好的 assigned_corner_for_piece
+		// Check if current piece has an assigned corner task
+		// Uses pre-calculated 'assigned_corner_for_piece'
 		if (assigned_corner_for_piece[piece] != -1) {
 			int assigned_corner = assigned_corner_for_piece[piece];
 			int current_dist;
 
-			// 計算當前位置到分配角落的距離
 			int p_row = src / 6;
 			int p_col = src % 6;
 
 			if (assigned_corner == 0) {
 				current_dist = p_row + p_col;
-				// 檢查移動是否更接近分配的角落
-				if (d0 < current_dist) {
+				if (d0 < current_dist) {  // Moving closer to corner 0
 					corner_bonus = 1.01;
 				}
 			} else if (assigned_corner == 1) {
 				current_dist = p_row + (5 - p_col);
-				if (d5 < current_dist) {
+				if (d5 < current_dist) {  // Moving closer to corner 5
 					corner_bonus = 1.01;
 				}
 			} else if (assigned_corner == 2) {
 				current_dist = (5 - p_row) + p_col;
-				if (d30 < current_dist) {
+				if (d30 < current_dist) {  // Moving closer to corner 30
 					corner_bonus = 1.01;
 				}
 			} else if (assigned_corner == 3) {
 				current_dist = (5 - p_row) + (5 - p_col);
-				if (d35 < current_dist) {
+				if (d35 < current_dist) {  // Moving closer to corner 35
 					corner_bonus = 1.01;
 				}
 			}
@@ -832,13 +807,9 @@ int GST::highest_weight(DATA& d) {
 		if (piece_nums[2] <= 1 && board[dst] == 0) {
 			WEIGHT[move_index] *= 1.01;
 		}
-
-		// printf("Move = %d | piece: %c, direction: %d, WEIGHT[]: %f\n\n", move_index,
-		// print_piece[piece], direction, WEIGHT[move_index]);
 	}
 
-	// 【!!! 保留你新的結尾邏輯 !!!】
-	// 共用統計（max/min/argmax）與 RNG
+	// Final Selection Logic (Softmax / Linear / Argmax)
 	float max_weight = -std::numeric_limits<float>::infinity();
 	float min_weight = std::numeric_limits<float>::infinity();
 	std::vector<int> best_candidates;
@@ -846,13 +817,13 @@ int GST::highest_weight(DATA& d) {
 
 	for (int i = 0; i < root_nmove; ++i) {
 		const float wi = WEIGHT[i];
-		if (!(wi == wi)) continue;	// 跳過 NaN
+		if (!(wi == wi)) continue;	// Skip NaN
 		if (wi > max_weight) {
 			max_weight = wi;
-			best_candidates.clear();	   // 發現新的霸主，清空舊名單
-			best_candidates.push_back(i);  // 加入新霸主
+			best_candidates.clear();
+			best_candidates.push_back(i);
 		} else if (wi == max_weight) {
-			best_candidates.push_back(i);  // 平手，加入候選名單
+			best_candidates.push_back(i);
 		}
 		if (wi < min_weight) {
 			min_weight = wi;
@@ -864,22 +835,22 @@ int GST::highest_weight(DATA& d) {
 		best_idx = best_candidates[rng(best_candidates.size())];
 	}
 	if (best_idx < 0) {
-		best_idx = 0;  // 全 NaN 時的保底
+		best_idx = 0;  // Fallback
 		max_weight = 0.0f;
 		min_weight = 0.0f;
 	}
 
-	int chosen_idx = best_idx;	// 預設為 argmax
+	int chosen_idx = best_idx;	// Default to argmax
 
 #if SELECTION_MODE == 2
-	// softmax 機率抽樣
-	const double temperature = 1.0;				   // 可視需求調整
-	const double T = std::max(1e-9, temperature);  // 防 0/負溫度
+	// Softmax Probability Sampling
+	const double temperature = 1.0;
+	const double T = std::max(1e-9, temperature);
 	std::vector<double> probs(root_nmove, 0.0);
 	double sumProb = 0.0;
 	for (int i = 0; i < root_nmove; i++) {
 		double wi = static_cast<double>(WEIGHT[i]);
-		if (!(wi == wi)) {	// NaN -> 當 0
+		if (!(wi == wi)) {	// NaN -> 0
 			probs[i] = 0.0;
 			continue;
 		}
@@ -897,18 +868,18 @@ int GST::highest_weight(DATA& d) {
 			if (target < acc) {
 				chosen_idx = i;
 				break;
-			}  // 改成嚴格比較
+			}
 		}
 		if (chosen_idx < 0) chosen_idx = best_idx;
 	}
 #elif SELECTION_MODE == 1
-	// 線性權重抽樣（負數平移，Σw=0 回退 argmax）
+	// Linear Weight Sampling (Shift negative values)
 	const double shift = (min_weight < 0.0f) ? -static_cast<double>(min_weight) : 0.0;
 	std::vector<double> w(root_nmove, 0.0);
 	double sumW = 0.0;
 	for (int i = 0; i < root_nmove; i++) {
 		double wi = static_cast<double>(WEIGHT[i]);
-		if (!(wi == wi)) {	// NaN -> 當 0
+		if (!(wi == wi)) {	// NaN -> 0
 			w[i] = 0.0;
 			continue;
 		}
@@ -931,13 +902,17 @@ int GST::highest_weight(DATA& d) {
 		if (chosen_idx < 0) chosen_idx = best_idx;
 	}
 #else
-	// 直接使用 argmax（已在 best_idx 計算）
+	// Argmax (Already calculated in best_idx)
 #endif
 
-	// 萬一前面沒選到（極少見的邊界），保底 argmax
+	// Final safety check
 	if (chosen_idx < 0 || chosen_idx >= root_nmove) chosen_idx = best_idx;
 	return root_moves[chosen_idx];
 }
+
+// ==========================================
+// Main Application Entry
+// ==========================================
 
 DATA data;
 
@@ -964,7 +939,7 @@ int main() {
 		ISMCTS ismcts(5000);
 		bool my_turn = true;
 
-		// 重置所有遊戲狀態
+		// Reset all states
 		game.init_board();
 		mcts.reset();
 		ismcts.reset();
@@ -976,12 +951,15 @@ int main() {
 			print_progress_bar(game_num - 1, num_games);
 		}
 
+		// Main Game Loop
 		while (!game.is_over()) {
 			if (my_turn) {
 				if (num_games == 1) std::cout << "Player 1 (ISMCTS) 思考中...\n";
 				stats.ismcts_total_steps++;
 				auto start = std::chrono::steady_clock::now();
+
 				int move = ismcts.findBestMove(game, data);
+
 				auto end = std::chrono::steady_clock::now();
 				stats.ismcts_total_times +=
 					std::chrono::duration<double, std::milli>(end - start).count();
@@ -1002,27 +980,27 @@ int main() {
 			my_turn = !my_turn;
 		}
 
-		// Update statistics
+		// Update statistics based on result
 		int winner = game.get_winner();
 		if (winner == -2) {
 			stats.draws++;
 		} else if (winner == USER) {
-			stats.ismcts_wins++;  // 總勝場+1
+			stats.ismcts_wins++;
 			if (game.is_escape) {
-				stats.ismcts_escape++;	// 藍子逃脫+1
+				stats.ismcts_escape++;
 			} else if (game.piece_nums[0] == 0) {
-				stats.ismcts_enemy_red++;  // 我方紅子被吃光+1
+				stats.ismcts_enemy_red++;
 			} else if (game.piece_nums[3] == 0) {
-				stats.ismcts_enemy_blue++;	// 敵方藍子被吃光+1
+				stats.ismcts_enemy_blue++;
 			}
 		} else if (winner == ENEMY) {
-			stats.mcts_wins++;	// 總勝場+1
+			stats.mcts_wins++;
 			if (game.is_escape) {
-				stats.mcts_escape++;  // 藍子逃脫+1
+				stats.mcts_escape++;
 			} else if (game.piece_nums[2] == 0) {
-				stats.mcts_enemy_red++;	 // 我方紅子被吃光+1
+				stats.mcts_enemy_red++;
 			} else if (game.piece_nums[1] == 0) {
-				stats.mcts_enemy_blue++;  // 敵方藍子被吃光+1
+				stats.mcts_enemy_blue++;
 			}
 		}
 

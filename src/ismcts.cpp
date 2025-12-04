@@ -1,21 +1,30 @@
+/**
+ * @file ISMCTS.cpp
+ * @brief Implementation of Information Set Monte Carlo Tree Search
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #include "ismcts.hpp"
 
-// ISMCTS 演算法的方向值常數
+// Definition of static constant
 constexpr int ISMCTS::dir_val[4];
 
 // =============================
-// ISMCTS 類別建構子
+// Constructor & Lifecycle
 // =============================
-// 初始化模擬次數與隨機種子
+
+/**
+ * @brief Construct a new ISMCTS object and seed the RNG.
+ */
 ISMCTS::ISMCTS(int simulations) : simulations(simulations) {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 	rng.seed(static_cast<unsigned int>(seed));
 }
 
-// =============================
-// 重置 ISMCTS 狀態
-// =============================
-// 重新設定隨機種子、清理根節點與排列統計
+/**
+ * @brief Resets the ISMCTS state, clearing the tree and statistical data.
+ */
 void ISMCTS::reset() {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 	rng.seed(static_cast<unsigned int>(seed));
@@ -25,26 +34,31 @@ void ISMCTS::reset() {
 }
 
 // =============================
-// 取得確定化狀態
+// Determinization Strategy
 // =============================
-// 根據原始狀態與目前迭代，隨機化未知棋子顏色
+
+/**
+ * @brief Creates a concrete game state (determinization) from the information set.
+ * * Calls randomizeUnrevealedPieces to guess hidden information.
+ */
 GST ISMCTS::getDeterminizedState(const GST& originalState, int current_iteration) {
 	GST determinizedState = originalState;
 	randomizeUnrevealedPieces(determinizedState, current_iteration);
-
 	return determinizedState;
 }
 
-// =============================
-// 隨機化未知顏色的棋子
-// =============================
-// 早期純隨機，後期根據統計加權
+/**
+ * @brief Randomizes the colors of unrevealed pieces.
+ * * Strategy:
+ * * - Early iterations: Pure random shuffling.
+ * * - Later iterations: Weighted random based on historical win rates (Inference).
+ */
 void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 	const bool* revealed = state.get_revealed();
 	std::vector<int> unrevealed_pieces;
 	int redCount = 0, blueCount = 0;
 
-	// 統計已揭示的紅藍棋子數量，並收集未知顏色的棋子
+	// 1. Identify all unrevealed pieces and count revealed colors
 	for (int i = PIECES; i < PIECES * 2; i++) {
 		if (revealed[i]) {
 			if (state.get_color(i) == -RED)
@@ -63,11 +77,12 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 
 	if (unrevealed_pieces.empty()) return;
 
-	// 後期才用統計資訊
+	// 2. Decide strategy based on iteration count
+	// Use inference stats only in the latter half of simulations
 	bool use_stats = (current_iteration >= simulations / 2);
 
 	if (!use_stats) {
-		// 早期：純隨機確定化 + 紀錄排列字串（在 simulation() 結束後更新）
+		// Strategy A: Pure Random Shuffle
 		std::shuffle(unrevealed_pieces.begin(), unrevealed_pieces.end(), rng);
 		for (size_t i = 0; i < unrevealed_pieces.size(); i++) {
 			int piece = unrevealed_pieces[i];
@@ -80,8 +95,8 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 		return;
 	}
 
-	// 後期：用 arrangement_stats 來推測
-	// 生成所有合法排列
+	// Strategy B: Inference-based Weighted Shuffle
+	// Generate all valid arrangements of remaining pieces
 	std::vector<std::vector<int>> arrangements;
 	int total_pieces = redRemaining + blueRemaining;
 	int total_combinations = 1 << total_pieces;
@@ -103,7 +118,7 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 		}
 	}
 
-	// 計算每個排列的推測勝率
+	// Calculate win probability for each arrangement
 	std::vector<double> win_rates;
 	for (const auto& arrangement : arrangements) {
 		std::string key;
@@ -113,18 +128,18 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 
 		auto it = arrangement_stats.find(key);
 		if (it == arrangement_stats.end() || it->second.second == 0) {
-			win_rates.push_back(0.5);
+			win_rates.push_back(0.5);  // Default to 50% if no data
 		} else {
 			double win_rate = static_cast<double>(it->second.first) / it->second.second;
 			win_rates.push_back(win_rate);
 		}
 	}
 
-	// 根據反勝率加權
+	// Calculate selection weights (inverse win rate logic to find harder scenarios?)
 	std::vector<double> weights;
 	double total_weight = 0.0;
 	for (double rate : win_rates) {
-		double weight = 1.0 - rate + 0.05;
+		double weight = 1.0 - rate + 0.05;	// Add bias
 		weights.push_back(weight);
 		total_weight += weight;
 	}
@@ -133,7 +148,7 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 		w /= total_weight;
 	}
 
-	// 加權隨機選排列
+	// Select an arrangement using weighted random distribution
 	std::uniform_real_distribution<> dist(0.0, 1.0);
 	double r = dist(rng);
 	double cumulative = 0.0;
@@ -145,7 +160,8 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 			break;
 		}
 	}
-	// 更新 arrangement_stats
+
+	// Apply the selected arrangement to the state
 	const auto& selected_arrangement = arrangements[selected_idx];
 	for (size_t i = 0; i < unrevealed_pieces.size(); i++) {
 		state.set_color(unrevealed_pieces[i], selected_arrangement[i]);
@@ -153,19 +169,60 @@ void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
 }
 
 // =============================
-// 選擇階段
+// Helper Functions
 // =============================
-// 根據 UCB 選擇最佳子節點
+
+/**
+ * @brief Calculates UCB1 value for ISMCTS.
+ * * Note: Uses 'avail_cnt' from parent to account for how often this move
+ * * was available in determinizations, rather than just visits.
+ */
+double ISMCTS::calculateUCB(const Node* node) const {
+	// Infinite priority for unvisited nodes
+	if (!node || node->visits == 0) return std::numeric_limits<double>::infinity();
+
+	// Exploitation: Average reward (-1 to 1)
+	double mean = static_cast<double>(node->wins) / node->visits;
+
+	// Exploration: Based on availability count from parent
+	int avail = 1;	// Avoid log(0)
+	if (node->parent) {
+		const auto& m = node->parent->avail_cnt;
+		auto it = m.find(node->move);
+		if (it != m.end()) avail = it->second;
+	}
+
+	int visits = std::max(1, node->visits);
+
+	// UCB Formula
+	double exploration =
+		EXPLORATION_PARAM * std::sqrt(std::log(static_cast<double>(avail)) / visits);
+
+	return mean + exploration;
+}
+
+// =============================
+// ISMCTS Core Stages
+// =============================
+
+/**
+ * @brief Phase 1: Selection
+ * * Traverses the tree. Because edges vary by determinization, we check
+ * * if the current node is "fully expanded" relative to the current determinized state.
+ */
 void ISMCTS::selection(Node*& node, GST& d) {
 	while (!d.is_over()) {
 		int moves[MAX_MOVES];
 		int n = d.gen_all_move(moves);
 		if (n == 0) break;
+
+		// Update availability count for these compatible moves
 		for (int i = 0; i < n; ++i) {
 			node->avail_cnt[moves[i]]++;
 		}
 
-		// 是否 fully-expanded（以「當前 d」為準）
+		// Check if node is fully expanded w.r.t the current determinization (d)
+		// i.e., Do all valid moves in 'd' already have corresponding children?
 		bool fully = true;
 		for (int i = 0; i < n; ++i) {
 			bool found = false;
@@ -179,19 +236,23 @@ void ISMCTS::selection(Node*& node, GST& d) {
 				break;
 			}
 		}
-		if (!fully) return;	 // 交給 expansion_one(node, d)
 
-		// cand = 當前 d 下可被選的子
+		// If not fully expanded, stop selection here and proceed to expansion phase
+		if (!fully) return;
+
+		// Filter children: only consider children compatible with current 'd'
 		std::vector<Node*> cand;
 		cand.reserve(node->children.size());
 		for (auto& ch : node->children)
 			if (std::find(moves, moves + n, ch->move) != moves + n) cand.push_back(ch.get());
-		if (cand.empty()) return;  // 防衛
 
-		// 先隨機打破未訪問偏序
+		if (cand.empty()) return;  // Defense check
+
+		// Heuristic: Prioritize unvisited compatible children first
 		std::vector<Node*> unvisited;
 		for (auto* c : cand)
 			if (c->visits == 0) unvisited.push_back(c);
+
 		if (!unvisited.empty()) {
 			std::uniform_int_distribution<int> pick(0, (int)unvisited.size() - 1);
 			Node* next = unvisited[pick(rng)];
@@ -200,7 +261,7 @@ void ISMCTS::selection(Node*& node, GST& d) {
 			continue;
 		}
 
-		// UCB（見❸ availability）
+		// Standard UCB Selection among compatible children
 		Node* best = nullptr;
 		double bestU = -1e100;
 
@@ -216,17 +277,17 @@ void ISMCTS::selection(Node*& node, GST& d) {
 	}
 }
 
-// =============================
-// 擴展階段
-// =============================
-// 對未結束節點產生所有合法子節點
+/**
+ * @brief Phase 2: Expansion
+ * * Expands the tree by adding ONE new child node valid in the current determinization.
+ */
 Node* ISMCTS::expansion(Node* node, GST& determinizedState) {
 	if (determinizedState.is_over()) return nullptr;
 
 	int moves[MAX_MOVES];
 	int moveCount = determinizedState.gen_all_move(moves);
 
-	// U = 當前 d 下尚未展開的合法動作集合
+	// U = Set of legal moves in 'd' that do NOT have children yet
 	std::vector<int> U;
 	U.reserve(moveCount);
 	for (int i = 0; i < moveCount; ++i) {
@@ -241,21 +302,21 @@ Node* ISMCTS::expansion(Node* node, GST& determinizedState) {
 
 	if (U.empty()) return nullptr;
 
+	// Pick one unexpanded move randomly
 	int move = U[std::uniform_int_distribution<int>(0, (int)U.size() - 1)(rng)];
-	auto newNode = std::make_unique<Node>(move);  // 節點不要存整盤面也行；至少存 move
+
+	auto newNode = std::make_unique<Node>(move);
 	newNode->parent = node;
 	Node* ret = newNode.get();
 	node->children.push_back(std::move(newNode));
 	return ret;
 }
 
-// =============================
-// 模擬階段
-// =============================
-// 隨機模擬遊戲直到結束，回傳勝負
-// USER 端用 epsilon-greedy，ENEMY 隨機
-// d: 資料物件，影響權重
-// =============================
+/**
+ * @brief Phase 3: Simulation (Rollout)
+ * * Epsilon-greedy simulation using weighted heuristics (DATA& d).
+ * @return 1.0 if root_player wins, -1.0 otherwise.
+ */
 double ISMCTS::simulation(GST& state, DATA& d, int root_player) {
 	GST simState = state;
 
@@ -273,15 +334,18 @@ double ISMCTS::simulation(GST& state, DATA& d, int root_player) {
 		std::uniform_int_distribution<int> pick(0, moveCount - 1);
 
 		int move;
+		// Decaying epsilon: exploring less as game progresses
 		double epsilon = std::max(0.1, 1.0 - static_cast<double>(step) / maxMoves);
 
 		if (simState.nowTurn == USER) {
+			// User Policy: Epsilon-Greedy
 			if (probDist(rng) < epsilon) {
 				move = moves[pick(rng)];
 			} else {
-				move = simState.highest_weight(d);
+				move = simState.highest_weight(d);	// Greedy choice based on weights
 			}
 		} else {
+			// Enemy Policy: Random
 			move = moves[pick(rng)];
 		}
 
@@ -289,18 +353,19 @@ double ISMCTS::simulation(GST& state, DATA& d, int root_player) {
 		++step;
 	}
 
-	if (!simState.is_over() && step >= maxMoves) return 0.0;  // 平手/截斷
+	if (!simState.is_over() && step >= maxMoves) return 0.0;  // Draw / Timeout
 
 	int winner = simState.get_winner();
 	return (winner == root_player) ? 1.0 : -1.0;
 }
 
-// =============================
-// 反向傳播階段
-// =============================
-// 將模擬結果回傳至路徑上的所有節點
+/**
+ * @brief Phase 4: Backpropagation
+ * * Updates stats. Note: This assumes fixed root perspective (wins are accumulated).
+ */
 void ISMCTS::backpropagation(Node* leaf, double result) {
-	// 1 N/W（固定 root 視角 result）
+	// Standard backprop (Non-Minimax update)
+	// Wins are always from the perspective of the root player
 	for (Node* p = leaf; p; p = p->parent) {
 		p->visits += 1;
 		p->wins += result;
@@ -308,69 +373,44 @@ void ISMCTS::backpropagation(Node* leaf, double result) {
 }
 
 // =============================
-// 計算 UCB 值
+// Main Interface
 // =============================
-// UCB = 勝率 + 探索項
-// 若未訪問則回傳無窮大
-// =============================
-double ISMCTS::calculateUCB(const Node* node) const {
-	// 未被訪問過：直接無窮大（先探索）
-	if (!node || node->visits == 0) return std::numeric_limits<double>::infinity();
 
-	// 平均回報（若 wins 代表±1 累積，這裡就是 mean ∈ [-1, 1]）
-	double mean = static_cast<double>(node->wins) / node->visits;
-
-	// 取父節點的 availability 計數（父節點×action）
-	int avail = 1;	// 至少 1，避免 log(0)
-	if (node->parent) {
-		const auto& m = node->parent->avail_cnt;
-		auto it = m.find(node->move);
-		if (it != m.end()) avail = it->second;
-	}
-
-	// 分母 visits 也保底
-	int visits = std::max(1, node->visits);
-
-	// 探索項：log(avail) / visits
-	double exploration =
-		EXPLORATION_PARAM * std::sqrt(std::log(static_cast<double>(avail)) / visits);
-
-	return mean + exploration;
-}
-
-// =============================
-// 尋找最佳移動 (AI主程式)
-// =============================
-// 進行多次模擬，選出訪問次數最多的子節點
+/**
+ * @brief Main ISMCTS Loop
+ */
 int ISMCTS::findBestMove(GST& game, DATA& d) {
+	// 1. Reset Tree
 	Node::cleanup(root);
 	root.reset(new Node());
 	arrangement_stats.clear();
 
-	// 固定 root 視角
+	// Identify Root Player to anchor simulation results
 	int root_player = game.nowTurn;
 
+	// 2. Main Simulation Loop
 	for (int i = 0; i < simulations; i++) {
 		Node* currentNode = root.get();
 
-		// 獲取確定化狀態
+		// Step A: Determinization (Sample a specific world)
 		GST determinizedState = getDeterminizedState(game, i);
 
-		// 選擇階段
+		// Step B: Selection
 		selection(currentNode, determinizedState);
 
-		// 如果節點沒有子節點且遊戲未結束，進行擴展
+		// Step C: Expansion (if needed)
 		if (!determinizedState.is_over()) {
-			Node* added = expansion(currentNode, determinizedState);  // 回傳剛建的子
+			Node* added = expansion(currentNode, determinizedState);
 			if (added) {
 				currentNode = added;
-				determinizedState.do_move(currentNode->move);
+				determinizedState.do_move(currentNode->move);  // Advance state to new node
 			}
 		}
 
+		// Step D: Simulation
 		double result = simulation(determinizedState, d, root_player);
 
-		// 更新 arrangement_stats
+		// Step E: Update Inference Stats (Arrangement Win Rates)
 		std::string arrangementKey;
 		const bool* revealed = game.get_revealed();
 		for (int i = PIECES; i < PIECES * 2; i++) {
@@ -380,19 +420,20 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 			}
 		}
 		auto& stats = arrangement_stats[arrangementKey];
-		if (result > 0) stats.first += 1;  // 勝場數
-		stats.second += 1;				   // 模擬次數
+		if (result > 0) stats.first += 1;  // Wins
+		stats.second += 1;				   // Total simulations for this arrangement
 
-		// 反向傳播結果
+		// Step F: Backpropagation
 		backpropagation(currentNode, result);
 	}
 
+	// 3. Select Best Move
 	Node* bestChild = nullptr;
 	int maxVisits = -1;
 	const char* dirNames[] = {"N", "W", "E", "S"};
 	bool hasValidMoves = false;
 
-	// 尋找訪問次數最多的子節點(最佳解)
+	// Robust Child Criteria: Pick the most visited node
 	for (auto& child : root->children) {
 		if (child->visits > maxVisits) {
 			maxVisits = child->visits;
@@ -400,24 +441,25 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 			hasValidMoves = true;
 		}
 	}
+
 	if (!hasValidMoves) {
 		fprintf(stderr, "No valid moves found. This might indicate the game is already over.\n");
 		return -1;
 	}
 
-	// 輸出最佳子節點的資訊
+	// Optional: Debug Output
 	if (bestChild) {
 		int piece = bestChild->move >> 4;
 		int direction = bestChild->move & 0xf;
 
-		fprintf(stderr, "piece: %d direction: %d\n", piece, direction);
+		fprintf(stderr, "ISMCTS Selected: Piece %d, Dir %s\n", piece, dirNames[direction]);
 		fprintf(stderr, "Win Rate: %.2f%%\n",
 				bestChild->visits > 0
 					? static_cast<double>(bestChild->wins) / bestChild->visits * 100
 					: 0.0);
 	}
 
-	fprintf(stderr, "return: %d\n", bestChild->move);
+	fprintf(stderr, "Returning Move: %d\n", bestChild->move);
 
 	return bestChild->move;
 }

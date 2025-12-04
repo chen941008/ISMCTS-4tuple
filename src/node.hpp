@@ -1,32 +1,59 @@
+/**
+ * @file node.hpp
+ * @brief Define MCTS node structure and related functions
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #ifndef NODE_HPP
 #define NODE_HPP
 
 #include "4T_header.h"
 
-// =============================
-// Node 類別：MCTS 樹節點
-// =============================
+/**
+ * @class Node
+ * @brief Represents a node in the Monte Carlo Tree Search (MCTS) tree.
+ * * This class stores node statistics (wins, visits), the move associated
+ * with the node, and pointers to maintain the tree structure.
+ */
 class Node {
    public:
-	int move;	  // 由父節點到此節點的移動（-1:根節點）
-	double wins;  // 節點累積勝利分數
-	int visits;	  // 節點被訪問次數
-	std::unordered_map<int, int> avail_cnt;
-	Node* parent;								  // 父節點指標
-	std::vector<std::unique_ptr<Node>> children;  // 子節點列表
+	/// @name Node Statistics
+	/// @{
+	int move;	  ///< The move taken from parent to reach this node (-1 indicates root)
+	double wins;  ///< Accumulated win score from simulations
+	int visits;	  ///< Total number of times this node has been visited
+	std::unordered_map<int, int> avail_cnt;	 ///< Tracks available moves or state counts
+	/// @}
 
-	Node(int move = -1);  // 建構子
+	/// @name Tree Structure
+	/// @{
+	Node* parent;  ///< Pointer to parent node (does not own memory)
+	std::vector<std::unique_ptr<Node>>
+		children;  ///< List of child nodes (owns memory via unique_ptr)
+	/// @}
 
-	// 遞迴清理整棵子樹
+	/**
+	 * @brief Construct a new Node object.
+	 * @param move The move leading to this node (default is -1 for root).
+	 */
+	Node(int move = -1);
+
+	/**
+	 * @brief Recursively cleans up the entire subtree.
+	 * * @note This function provides a safe way to destroy deep trees, preventing
+	 * potential stack overflow issues that might occur with default destructors.
+	 * * @param node Reference to the unique_ptr of the node to be cleaned.
+	 */
 	static void cleanup(std::unique_ptr<Node>& node) {
 		if (node) {
-			// 遞迴清理子節點
+			// Recursively clean up child nodes
 			for (auto& child : node->children) {
 				cleanup(child);
 			}
-			// 清理當前節點
+			// Clear the children vector of the current node
 			node->children.clear();
-			// 重置根節點
+			// Reset the current node (releases memory)
 			node.reset();
 		}
 	}

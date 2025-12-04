@@ -1,27 +1,48 @@
+/**
+ * @file MyAI.cpp
+ * @brief Implementation of the AI Server Interface.
+ * * Handles protocol parsing, board initialization, random red piece selection,
+ * * and move generation using the MCTS/ISMCTS engine.
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #include "MyAI.h"
 
 #include "../4T_header.h"
 #include "../ismcts.hpp"
-// 連線server主程式
+
+// Global instances for AI logic
 DATA data;
 GST game;
-ISMCTS ismcts(10000);
+ISMCTS ismcts(10000);  // Initialize ISMCTS with 10,000 simulations
 
 // =============================
-// MyAI 建構子/解構子
+// Constructor & Destructor
 // =============================
+
+/**
+ * @brief Construct a new MyAI object.
+ * * Initializes N-Tuple data and loads trained weights.
+ */
 MyAI::MyAI(void) {
-	data.init_data();			  // 初始化4-tuple資料
-	data.read_data_file(500000);  // 讀取資料
+	data.init_data();			  // Initialize N-Tuple structures
+	data.read_data_file(500000);  // Load pre-trained weights
 }
 
 MyAI::~MyAI(void) {}
 
 // =============================
-// Ini：初始化玩家、設定初始棋盤
+// Protocol Command: INI
 // =============================
+
+/**
+ * @brief Handles the 'ini' command: Sets up player ID and initial board.
+ * @param data Command arguments from server.
+ * @param response Buffer to store the initial board configuration for P2.
+ */
 void MyAI::Ini(const char* data[], char* response) {
-	// 設置玩家
+	// Parse Player ID (1 = User/First, 2 = Enemy/Second)
 	if (!strcmp(data[2], "1")) {
 		player = USER;
 	} else if (!strcmp(data[2], "2")) {
@@ -29,9 +50,9 @@ void MyAI::Ini(const char* data[], char* response) {
 	}
 
 	char position[16];
-	Init_board_state(position);	 // 產生初始棋盤
+	Init_board_state(position);	 // Generate initial piece layout
 
-	// P2 的棋子位置
+	// Format response: P2's piece positions (Protocol requirement)
 	snprintf(response, 50, "%c%c %c%c %c%c %c%c %c%c %c%c %c%c %c%c", position[0], position[1],
 			 position[2], position[3], position[4], position[5], position[6], position[7],
 			 position[8], position[9], position[10], position[11], position[12], position[13],
@@ -39,52 +60,80 @@ void MyAI::Ini(const char* data[], char* response) {
 }
 
 // =============================
-// Set：隨機選擇紅棋
+// Protocol Command: SET
 // =============================
+
+// High-resolution clock for random seeding
 auto now = std::chrono::high_resolution_clock::now();
 auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
 
-void MyAI::Set(char* response) {  // 設定紅棋
+/**
+ * @brief Handles the 'set' command: Randomly selects 4 Red pieces.
+ * @param response Buffer to return the selected Red pieces.
+ */
+void MyAI::Set(char* response) {
 	std::mt19937 generator(nanos);
 	std::string pieces = "ABCDEFGH";
+
+	// Shuffle pieces to pick 4 random ones as RED
 	std::shuffle(pieces.begin(), pieces.end(), generator);
 
 	std::string redString = pieces.substr(0, 4);
 
 	snprintf(response, 50, "SET:%s\r\n", redString.c_str());
 
+	// Debug fixed set (Optional)
 	// snprintf(response, 50, "SET:ABDH");
 }
 
 // =============================
-// Get：取得移動
+// Protocol Command: GET
 // =============================
-void MyAI::Get(const char* data[], char* response)	// get move
-{
-	// set dice & board
-	char position[49];	// 3*16+1
-	position[0] = '\0';
-	snprintf(position, sizeof(position), "%s", data[0] + 4);
-	Set_board(position);  // 設定棋盤
 
-	// generate move
+/**
+ * @brief Handles the 'get' command: Updates board and requests a move.
+ * @param data Command arguments (Current board string).
+ * @param response Buffer to return the calculated move.
+ */
+void MyAI::Get(const char* data[], char* response) {
+	// Parse board string from server message
+	char position[49];	// 3 chars per piece * 16 pieces + 1 null terminator
+	position[0] = '\0';
+	snprintf(position, sizeof(position), "%s", data[0] + 4);  // Skip "MOV?" prefix
+
+	Set_board(position);  // Sync internal board state
+
+	// Generate best move using AI
 	char move[50];
-	Generate_move(move);  // 產生移動
+	Generate_move(move);
+
+	// Format response
 	snprintf(response, 50, "MOV:%s", move);
 }
 
 // =============================
-// Exit：離開
+// Protocol Command: EXIT
 // =============================
+
+/**
+ * @brief Handles the 'exit' command: Cleanup and log.
+ */
 void MyAI::Exit(const char* data[], char* response) { fprintf(stderr, "Bye~\n"); }
 
-// *********************** AI 函數 *********************** //
+// *********************** AI Internal Logic *********************** //
 
 // =============================
-// Init_board_state：產生初始棋盤狀態
+// Board Initialization Logic
 // =============================
+
+/**
+ * @brief Generates the initial layout of pieces for both players.
+ * * Uses standard 4T dark chess starting positions.
+ */
 void MyAI::Init_board_state(char* position) {
-	int order[PIECES] = {0, 1, 2, 3, 4, 5, 6, 7};  // A~H
+	int order[PIECES] = {0, 1, 2, 3, 4, 5, 6, 7};  // Indices A~H
+
+	// Hardcoded initial positions (Coordinate format)
 	std::string p2_init_position = "4131211140302010";
 	std::string p1_init_position = "1424344415253545";
 
@@ -100,8 +149,14 @@ void MyAI::Init_board_state(char* position) {
 }
 
 // =============================
-// Set_board：根據 position 設定棋盤
+// Board Synchronization
 // =============================
+
+/**
+ * @brief Parses the server's board string and updates local state.
+ * * Also updates the GST (Game State) object for the AI engine.
+ * @param position String format: [X][Y][Color]...
+ */
 void MyAI::Set_board(char* position) {
 	memset(board, -1, sizeof(board));
 	memset(piece_colors, '0', sizeof(piece_colors));
@@ -111,38 +166,44 @@ void MyAI::Set_board(char* position) {
 	p1_piece_num = PIECES;
 
 	for (int i = 0; i < PIECES * 2; i++) {
-		int index = i * 3;	// 座標與顏色
+		int index = i * 3;	// Each piece info takes 3 chars
 
+		// Check if piece is dead (99 coordinates)
 		if (position[index] == '9' && position[index + 1] == '9') {
-			// P1
+			// Player 1 (User) pieces
 			if (i < PIECES) {
 				p1_piece_num--;
 				p1_exist[i] = 0;
 			}
-			// P2
+			// Player 2 (Enemy) pieces
 			else {
 				p2_piece_num--;
 				p2_exist[i - PIECES] = 0;
 			}
 			piece_pos[i] = -1;
 		}
-		// 0~7: P1 pieces; 8~15: P2 pieces
+		// Alive pieces: 0~7 (P1), 8~15 (P2)
 		else {
 			board[position[index + 1] - '0'][position[index] - '0'] = i;
 			piece_pos[i] = (position[index + 1] - '0') * BOARD_SIZE + (position[index] - '0');
 		}
-		piece_colors[i] = position[index + 2];	// 設定棋子顏色
+		piece_colors[i] = position[index + 2];	// Update color ('R', 'B', 'u', etc.)
 	}
 
-	game.set_board(position);  // 設定 GST 棋盤
-	// game.record_board();
+	// Sync with GST engine
+	game.set_board(position);
+	// game.record_board(); // Optional history tracking
 
-	Print_chessboard();	 // 印出棋盤
+	Print_chessboard();	 // Debug output
 }
 
 // =============================
-// Print_chessboard：印出棋盤狀態
+// Debug Visualization
 // =============================
+
+/**
+ * @brief Prints the current board state to stderr for debugging.
+ */
 void MyAI::Print_chessboard() {
 	fprintf(stderr, "\n");
 	// 0~7 represent P1 pieces; 8~15 represent P2 pieces
@@ -152,9 +213,9 @@ void MyAI::Print_chessboard() {
 			if (board[i][j] == -1)
 				fprintf(stderr, "   -");
 			else if (board[i][j] < PIECES) {
-				fprintf(stderr, "%4c", board[i][j] + 'A');
+				fprintf(stderr, "%4c", board[i][j] + 'A');	// P1 pieces (Uppercase)
 			} else
-				fprintf(stderr, "%4c", board[i][j] - PIECES + 'a');	 // 小寫代表 P2 棋子
+				fprintf(stderr, "%4c", board[i][j] - PIECES + 'a');	 // P2 pieces (Lowercase)
 		}
 		fprintf(stderr, "\n");
 	}
@@ -168,12 +229,17 @@ void MyAI::Print_chessboard() {
 }
 
 // =============================
-// Generate_move：產生最佳移動
+// Move Generation
 // =============================
+
+/**
+ * @brief Calculates the best move using ISMCTS and formats it string.
+ * @param move Buffer to store the result string (e.g., "A,NORTH").
+ */
 void MyAI::Generate_move(char* move) {
-	// int best_move = game.highest_weight(data); //純粹4tuple決定下一步
-	int best_move =
-		ismcts.findBestMove(game, data);  // 使用 ISMCTS 找到最佳移動 (目前是4tuple + ISMCTS)
+	// Strategy: Use ISMCTS with N-Tuple heuristic guidance
+	// int best_move = game.highest_weight(data); // Legacy: Pure N-Tuple Greedy
+	int best_move = ismcts.findBestMove(game, data);
 
 	int piece = best_move >> 4;
 	int direction = best_move & 0xf;
@@ -201,5 +267,6 @@ void MyAI::Generate_move(char* move) {
 
 	snprintf(move, 50, "%c,%s", piece_char, dir_str);
 
-	game.do_move(best_move);  // 執行移動
+	// Apply move locally to keep state consistent
+	game.do_move(best_move);
 }

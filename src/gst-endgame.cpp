@@ -2,9 +2,9 @@
 
 #include "gst-endgame.hpp"
 
+#include "4T_DATA.hpp"
 #include "ismcts.hpp"
 #include "mcts.hpp"
-#include "4T_DATA.hpp"
 
 // =============================
 // 靜態變數：棋子、方向、初始位置、pattern offset

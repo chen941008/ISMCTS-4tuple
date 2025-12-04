@@ -1,18 +1,30 @@
+/**
+ * @file MCTS.cpp
+ * @brief Implementation of the Standard Monte Carlo Tree Search
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #include "mcts.hpp"
 
+// Definition of static constant
 constexpr int MCTS::dir_val[4];
 
 // =============================
-// MCTS 建構子
+// Constructor & Lifecycle
 // =============================
+
+/**
+ * @brief Construct a new MCTS object and seed the RNG.
+ */
 MCTS::MCTS(int simulations) : simulations(simulations) {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 	rng.seed(static_cast<unsigned int>(seed));
 }
 
-// =============================
-// 重置 MCTS 狀態
-// =============================
+/**
+ * @brief Resets the RNG and clears the entire search tree.
+ */
 void MCTS::reset() {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 	rng.seed(static_cast<unsigned int>(seed));
@@ -21,33 +33,62 @@ void MCTS::reset() {
 }
 
 // =============================
-// 檢查是否會吃掉敵方紅棋
+// Helper Functions
 // =============================
+
+/**
+ * @brief Heuristic filter: Checks if a move targets an enemy Red piece.
+ * * Used to prune or skip specific moves during expansion.
+ */
 bool MCTS::would_eat_enemy_red(const GST& game, int piece, int dst) const {
 	int target_piece = game.piece_board[dst];
 	if (target_piece == -1) return false;
 
+	// Check if pieces belong to different camps (Enemy check)
 	bool is_enemy =
 		((piece < PIECES && target_piece >= PIECES) || (piece >= PIECES && target_piece < PIECES));
+
 	if (!is_enemy) return false;
 
 	int target_color = game.get_color(target_piece);
 	return std::abs(target_color) == RED;
 }
 
+/**
+ * @brief Calculates the Upper Confidence Bound (UCB1) value.
+ * * Uses standard formula: exploitation + C * exploration
+ */
+double MCTS::calculateUCB(const Node* node) const {
+	if (node->visits == 0) return std::numeric_limits<double>::infinity();
+
+	double exploitation = static_cast<double>(node->wins) / node->visits;
+	// Exploration parameter controls the balance between width and depth search
+	double exploration =
+		EXPLORATION_PARAM * std::sqrt(std::log(node->parent->visits) / node->visits);
+
+	return exploitation + exploration;
+}
+
 // =============================
-// 選擇階段：根據 UCB 選擇最佳子節點
+// MCTS Core Stages
 // =============================
+
+/**
+ * @brief Phase 1: Selection
+ * * Traverses the tree from root to leaf using UCB policy.
+ */
 void MCTS::selection(Node*& node, GST& state) {
 	while (!state.is_over() && !node->children.empty()) {
 		Node* bestChild = nullptr;
 		double bestUCB = -std::numeric_limits<double>::infinity();
 
 		for (auto& child : node->children) {
+			// If a child has never been visited, prioritize it immediately (Infinite UCB)
 			if (child->visits == 0) {
-				node = child.get();	 // 立即選擇未訪問節點
+				node = child.get();
 				return;
 			}
+
 			double ucb = calculateUCB(child.get());
 			if (ucb > bestUCB) {
 				bestUCB = ucb;
@@ -62,9 +103,11 @@ void MCTS::selection(Node*& node, GST& state) {
 	}
 }
 
-// =============================
-// 擴展階段：產生所有合法子節點
-// =============================
+/**
+ * @brief Phase 2: Expansion
+ * * Generates all valid moves for the leaf node and adds them as children.
+ * * Applies heuristics to skip certain moves (e.g., eating red pieces).
+ */
 void MCTS::expansion(Node* node, GST& state) {
 	if (state.is_over()) return;
 
@@ -77,19 +120,24 @@ void MCTS::expansion(Node* node, GST& state) {
 		int dir = move & 0xf;
 		int dst = state.get_pos(piece) + dir_val[dir];
 
+		// Apply heuristic pruning
 		if (would_eat_enemy_red(state, piece, dst)) continue;
 
+		// Create new child node
 		GST newState = state;
 		newState.do_move(move);
+
 		std::unique_ptr<Node> newNode(new Node(move));
 		newNode->parent = node;
 		node->children.push_back(std::move(newNode));
 	}
 }
 
-// =============================
-// 模擬階段：隨機模擬遊戲直到結束
-// =============================
+/**
+ * @brief Phase 3: Simulation (Rollout)
+ * * Plays a random game from the current state until terminal state or depth limit.
+ * @return 1 if Enemy wins, -1 otherwise (from the perspective of current player)
+ */
 int MCTS::simulation(GST& state) {
 	GST simState = state;
 	int moves[MAX_MOVES];
@@ -103,64 +151,59 @@ int MCTS::simulation(GST& state) {
 		moveCount = simState.gen_all_move(moves);
 		if (moveCount == 0) break;
 
-		// 純隨機模擬
+		// Pure random policy
 		int randomIndex = dist(rng) % moveCount;
 		simState.do_move(moves[randomIndex]);
 		depth++;
 	}
 
-	// 遊戲結束狀態
-	if (!simState.is_over() && depth >= maxDepth) return 0;
+	// Handle game ended or depth limit reached
+	if (!simState.is_over() && depth >= maxDepth) return 0;	 // Draw/Timeout
 	return simState.get_winner() == ENEMY ? 1 : -1;
 }
 
-// =============================
-// 反向傳播階段：將模擬結果回傳至路徑上的所有節點
-// =============================
+/**
+ * @brief Phase 4: Backpropagation
+ * * Updates the win/visit statistics from the simulation node back up to the root.
+ */
 void MCTS::backpropagation(Node* node, int result) {
 	while (node != nullptr) {
 		node->visits += 1;
 		node->wins += result;
-		result = -result;  // 在每一層交替結果
+		result = -result;  // Toggle result for Minimax (switch perspective)
 		node = node->parent;
 	}
 }
 
 // =============================
-// 計算 UCB 值
+// Main Interface
 // =============================
-double MCTS::calculateUCB(const Node* node) const {
-	if (node->visits == 0) return std::numeric_limits<double>::infinity();
 
-	double exploitation = static_cast<double>(node->wins) / node->visits;
-	double exploration =
-		EXPLORATION_PARAM * std::sqrt(std::log(node->parent->visits) / node->visits);
-
-	return exploitation + exploration;
-}
-
-// =============================
-// 尋找最佳移動 (AI主程式)
-// =============================
+/**
+ * @brief Executes the MCTS algorithm to find the optimal move.
+ */
 int MCTS::findBestMove(GST& game) {
+	// 1. Clean up previous tree and initialize root
 	Node::cleanup(root);
 	root.reset(new Node());
 
+	// 2. Main MCTS Loop
 	for (int i = 0; i < simulations; i++) {
 		Node* currentNode = root.get();
 
-		// 選擇階段
+		// Stage 1: Selection
 		selection(currentNode, game);
 
-		// 如果節點沒有子節點且遊戲未結束，進行擴展
+		// Stage 2: Expansion
+		// Expand if node is a leaf and game is not over
 		if (currentNode->children.empty() && !game.is_over()) {
 			expansion(currentNode, game);
 		}
 
-		// 確保有子節點可選擇
+		// Determine which node to simulate
 		Node* nodeToSimulate = currentNode;
 
-		// 隨機選擇一個子節點進行模擬
+		// Randomly pick a child to simulate if children exist
 		if (!currentNode->children.empty()) {
 			std::uniform_int_distribution<> dist(0, currentNode->children.size() - 1);
 			int randomIndex = dist(rng);
@@ -168,19 +211,21 @@ int MCTS::findBestMove(GST& game) {
 			nodeToSimulate = it->get();
 		}
 
-		// 執行這個 move
+		// Stage 3: Simulation
 		GST simulationState = game;
-		simulationState.do_move(nodeToSimulate->move);
+		if (nodeToSimulate->move != -1) {  // Apply move if not root
+			simulationState.do_move(nodeToSimulate->move);
+		}
 		int result = simulation(simulationState);
 
-		// 反向傳播結果
+		// Stage 4: Backpropagation
 		backpropagation(nodeToSimulate, result);
 	}
 
+	// 3. Select Best Move (Robust Child)
 	Node* bestChild = nullptr;
 	int maxVisits = -1;
 
-	// 尋找訪問次數最多的子節點(最佳解)
 	for (auto& child : root->children) {
 		if (child->visits > maxVisits) {
 			maxVisits = child->visits;
@@ -188,13 +233,13 @@ int MCTS::findBestMove(GST& game) {
 		}
 	}
 
-	// 輸出最佳子節點的資訊
+	// Optional: Debug Output
 	if (bestChild) {
 		int piece = bestChild->move >> 4;
 		int direction = bestChild->move & 0xf;
 		const char* dirNames[] = {"N", "W", "E", "S"};
 
-		std::cout << "MCTS 選擇移動: ";
+		std::cout << "MCTS Selected Move: ";
 		if (piece < PIECES)
 			std::cout << static_cast<char>('A' + piece % PIECES);
 		else

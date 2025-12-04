@@ -1,49 +1,64 @@
+/**
+ * @file 4T_DATA_impl.cpp
+ * @brief Implementation of the DATA class for N-Tuple network weights.
+ * * Handles initialization, CSV parsing, and file I/O for weight tables (LUTs).
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #include "4T_DATA.hpp"
 #include "4T_header.h"
 
-// =============================
-// DATA::init_data
-// 初始化所有 LUT 及 4-tuple pattern 位置轉換表
-// =============================
+// ==========================================
+// Initialization
+// ==========================================
+
+/**
+ * @brief Initializes all Look-Up Tables (LUTs) and the N-Tuple translation table.
+ * * Sets default weights to 1, visit counts to 2, and win rates to 0.5.
+ * * Pre-computes the position-to-feature mapping (trans array).
+ */
 void DATA::init_data() {
 	for (int i = 0; i < TUPLE_NUM * FEATURE_NUM; i++) {
-		// 初始權重1/2 = 0.5
-		LUTw_E[i] = 1;	   // 敵方權重初始值
-		LUTv_E[i] = 2;	   // 敵方次數初始值
-		LUTwr_E[i] = 0.5;  // 敵方權重初始值
-		LUTw_U[i] = 1;	   // 我方權重初始值
-		LUTv_U[i] = 2;	   // 我方次數初始值
-		LUTwr_U[i] = 0.5;  // 我方權重初始值
+		// Initial weight 1/2 = 0.5
+		LUTw_E[i] = 1;	   // Initial Enemy Weight
+		LUTv_E[i] = 2;	   // Initial Enemy Visits
+		LUTwr_E[i] = 0.5;  // Initial Enemy Win Rate
+		LUTw_U[i] = 1;	   // Initial User Weight
+		LUTv_U[i] = 2;	   // Initial User Visits
+		LUTwr_U[i] = 0.5;  // Initial User Win Rate
 
-		LUTw_E_R1[i] = 1;  // R1 資料集初始值
+		// Initialize specialized datasets (R1/B1)
+		LUTw_E_R1[i] = 1;
 		LUTv_E_R1[i] = 2;
-		LUTwr_E_R1[i] = 0.5;  // R1 資料集初始值
+		LUTwr_E_R1[i] = 0.5;
 		LUTw_U_R1[i] = 1;
 		LUTv_U_R1[i] = 2;
-		LUTwr_U_R1[i] = 0.5;  // R1 資料集初始值
-		LUTw_E_B1[i] = 1;	  // B1 資料集初始值
+		LUTwr_U_R1[i] = 0.5;
+
+		LUTw_E_B1[i] = 1;
 		LUTv_E_B1[i] = 2;
-		LUTwr_E_B1[i] = 0.5;  // B1 資料集初始值
+		LUTwr_E_B1[i] = 0.5;
 		LUTw_U_B1[i] = 1;
 		LUTv_U_B1[i] = 2;
-		LUTwr_U_B1[i] = 0.5;  // B1 資料集初始值
+		LUTwr_U_B1[i] = 0.5;
 	}
 
 	int loca_num = 0;
 	for (int i = 0; i < ROW * COL; i++) {  // 0~35
 		int loc;
-		// 把盤面上的所有tuple做編碼，一個一個存到trans裡方便未來查找跟轉換
-		if (i % 6 <= 2) {  // 1x4
+		// Encode all tuples on the board and store them in 'trans' for future lookup
+		if (i % 6 <= 2) {  // 1x4 Pattern
 			loca_num++;
 			loc = i * 36 * 36 * 36 + (i + 1) * 36 * 36 + (i + 2) * 36 + (i + 3);
 			trans[loc] = loca_num;
 		}
-		if (i < 18) {  // 4x1
+		if (i < 18) {  // 4x1 Pattern
 			loca_num++;
 			loc = i * 36 * 36 * 36 + (i + 6) * 36 * 36 + (i + 12) * 36 + (i + 18);
 			trans[loc] = loca_num;
 		}
-		if (i % 6 <= 4 && i < 30) {	 // 2x2
+		if (i % 6 <= 4 && i < 30) {	 // 2x2 Pattern
 			loca_num++;
 			loc = i * 36 * 36 * 36 + (i + 1) * 36 * 36 + (i + 6) * 36 + (i + 7);
 			trans[loc] = loca_num;
@@ -51,10 +66,15 @@ void DATA::init_data() {
 	}
 }
 
-// =============================
-// _csv
-// 字串分割成 vector（以逗號分隔）
-// =============================
+// ==========================================
+// Helper Functions
+// ==========================================
+
+/**
+ * @brief Helper: Splits a comma-separated string into a vector.
+ * @param s The input CSV string.
+ * @return std::vector<std::string> The list of tokens.
+ */
 std::vector<std::string> _csv(std::string s) {
 	std::vector<std::string> arr;
 	std::istringstream delim(s);
@@ -67,12 +87,14 @@ std::vector<std::string> _csv(std::string s) {
 	return arr;
 }
 
-// =============================
-// 讀取資料檔案，更新 LUT
-// =============================
-void DATA::read_data_file(int num) {  // reada the data in CSV and write to 2-tuple array
-	// std::ifstream iEdata("Edata.csv", std::ios::in);
+// ==========================================
+// File I/O (Standard Game)
+// ==========================================
 
+/**
+ * @brief Loads weight data from CSV files and updates LUTs.
+ */
+void DATA::read_data_file(int num) {  // Reads data from CSV and writes to array
 	std::string E_filename = "./data/Edata_" + std::to_string(num) + ".csv";
 	std::ifstream iEdata(E_filename, std::ios::in);
 
@@ -82,8 +104,8 @@ void DATA::read_data_file(int num) {  // reada the data in CSV and write to 2-tu
 		Edata.open("Edata.csv", std::ios::out | std::ios::trunc);
 	} else {
 		std::string line;
-		bool first_line = 1;			 // first line or not
-		while (getline(iEdata, line)) {	 // getline(iEdata, line) => read the data in CSV by row
+		bool first_line = 1;			 // Flag for header row
+		while (getline(iEdata, line)) {	 // Read row by row
 			if (first_line) {
 				first_line = 0;
 				continue;
@@ -96,8 +118,6 @@ void DATA::read_data_file(int num) {  // reada the data in CSV and write to 2-tu
 		}
 	}
 
-	// std::ifstream iUdata("Udata.csv", std::ios::in);
-
 	std::string U_filename = "./data/Udata_" + std::to_string(num) + ".csv";
 	std::ifstream iUdata(U_filename, std::ios::in);
 
@@ -107,8 +127,8 @@ void DATA::read_data_file(int num) {  // reada the data in CSV and write to 2-tu
 		Udata.open("Udata.csv", std::ios::out | std::ios::trunc);
 	} else {
 		std::string line;
-		bool first_line = 1;			 // first line or not
-		while (getline(iUdata, line)) {	 // getline(iUdata, line) => read the data in CSV by row
+		bool first_line = 1;			 // Flag for header row
+		while (getline(iUdata, line)) {	 // Read row by row
 			if (first_line) {
 				first_line = 0;
 				continue;
@@ -121,113 +141,10 @@ void DATA::read_data_file(int num) {  // reada the data in CSV and write to 2-tu
 	}
 }
 
-void DATA::read_data_file_R1(int num) {	 // reada the data in CSV and write to 2-tuple array
-	// std::ifstream iEdata("Edata.csv", std::ios::in);
-
-	std::string E_filename = "./data R1/Edata_" + std::to_string(num) + ".csv";
-	std::ifstream iEdata(E_filename, std::ios::in);
-
-	if (!iEdata) {
-		printf("Add new R1 Edata.csv\n");
-		std::ofstream Edata;
-		Edata.open("Edata.csv", std::ios::out | std::ios::trunc);
-	} else {
-		std::string line;
-		bool first_line = 1;			 // first line or not
-		while (getline(iEdata, line)) {	 // getline(iEdata, line) => read the data in CSV by row
-			if (first_line) {
-				first_line = 0;
-				continue;
-				;
-			}
-			std::vector<std::string> a = _csv(line);
-			LUTw_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
-			LUTv_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-			LUTwr_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
-		}
-	}
-
-	// std::ifstream iUdata("Udata.csv", std::ios::in);
-
-	std::string U_filename = "./data R1/Udata_" + std::to_string(num) + ".csv";
-	std::ifstream iUdata(U_filename, std::ios::in);
-
-	if (!iUdata) {
-		printf("Add new R1 Udata.csv\n");
-		std::ofstream Udata;
-		Udata.open("Udata.csv", std::ios::out | std::ios::trunc);
-	} else {
-		std::string line;
-		bool first_line = 1;			 // first line or not
-		while (getline(iUdata, line)) {	 // getline(iUdata, line) => read the data in CSV by row
-			if (first_line) {
-				first_line = 0;
-				continue;
-			}
-			std::vector<std::string> a = _csv(line);
-			LUTw_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
-			LUTv_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-			LUTwr_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
-		}
-	}
-}
-
-void DATA::read_data_file_B1(int num) {	 // reada the data in CSV and write to 2-tuple array
-	// std::ifstream iEdata("Edata.csv", std::ios::in);
-
-	std::string E_filename = "./data B1/Edata_" + std::to_string(num) + ".csv";
-	std::ifstream iEdata(E_filename, std::ios::in);
-
-	if (!iEdata) {
-		printf("Add new B1 Edata.csv\n");
-		std::ofstream Edata;
-		Edata.open("Edata.csv", std::ios::out | std::ios::trunc);
-	} else {
-		std::string line;
-		bool first_line = 1;			 // first line or not
-		while (getline(iEdata, line)) {	 // getline(iEdata, line) => read the data in CSV by row
-			if (first_line) {
-				first_line = 0;
-				continue;
-				;
-			}
-			std::vector<std::string> a = _csv(line);
-			LUTw_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
-			LUTv_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-			LUTwr_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
-		}
-	}
-
-	// std::ifstream iUdata("Udata.csv", std::ios::in);
-
-	std::string U_filename = "./data B1/Udata_" + std::to_string(num) + ".csv";
-	std::ifstream iUdata(U_filename, std::ios::in);
-
-	if (!iUdata) {
-		printf("Add new B1 Udata.csv\n");
-		std::ofstream Udata;
-		Udata.open("Udata.csv", std::ios::out | std::ios::trunc);
-	} else {
-		std::string line;
-		bool first_line = 1;			 // first line or not
-		while (getline(iUdata, line)) {	 // getline(iUdata, line) => read the data in CSV by row
-			if (first_line) {
-				first_line = 0;
-				continue;
-			}
-			std::vector<std::string> a = _csv(line);
-			LUTw_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
-			LUTv_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
-			LUTwr_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
-		}
-	}
-}
-
-void DATA::write_data_file_run(int run) {  // open file & write file
-	// if (mkdir("data", 0777) != 0) {
-	//     // new file
-	// }
-
+/**
+ * @brief Saves current weights to CSV files for a specific run.
+ */
+void DATA::write_data_file_run(int run) {  // Open file & write file
 	std::ofstream Edata, Udata;
 
 	std::string E_filename = "data/Edata_" + std::to_string(run) + ".csv";
@@ -261,11 +178,64 @@ void DATA::write_data_file_run(int run) {  // open file & write file
 	Udata.close();
 }
 
-void DATA::write_data_file_run_R1(int run) {  // open file & write file
-	// if (mkdir("data R1", 0777) != 0) {
-	//     // new file
-	// }
+// ==========================================
+// File I/O (Specialized Scenarios: R1/B1)
+// ==========================================
 
+/**
+ * @brief Loads weight data for R1 scenario (Enemy has 1 Red piece left).
+ */
+void DATA::read_data_file_R1(int num) {
+	std::string E_filename = "./data R1/Edata_" + std::to_string(num) + ".csv";
+	std::ifstream iEdata(E_filename, std::ios::in);
+
+	if (!iEdata) {
+		printf("Add new R1 Edata.csv\n");
+		std::ofstream Edata;
+		Edata.open("Edata.csv", std::ios::out | std::ios::trunc);
+	} else {
+		std::string line;
+		bool first_line = 1;
+		while (getline(iEdata, line)) {
+			if (first_line) {
+				first_line = 0;
+				continue;
+				;
+			}
+			std::vector<std::string> a = _csv(line);
+			LUTw_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
+			LUTv_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
+			LUTwr_E_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
+		}
+	}
+
+	std::string U_filename = "./data R1/Udata_" + std::to_string(num) + ".csv";
+	std::ifstream iUdata(U_filename, std::ios::in);
+
+	if (!iUdata) {
+		printf("Add new R1 Udata.csv\n");
+		std::ofstream Udata;
+		Udata.open("Udata.csv", std::ios::out | std::ios::trunc);
+	} else {
+		std::string line;
+		bool first_line = 1;
+		while (getline(iUdata, line)) {
+			if (first_line) {
+				first_line = 0;
+				continue;
+			}
+			std::vector<std::string> a = _csv(line);
+			LUTw_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
+			LUTv_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
+			LUTwr_U_R1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
+		}
+	}
+}
+
+/**
+ * @brief Saves R1 scenario weights to CSV files.
+ */
+void DATA::write_data_file_run_R1(int run) {
 	std::ofstream Edata, Udata;
 
 	std::string E_filename = "data R1/Edata_" + std::to_string(run) + ".csv";
@@ -299,11 +269,60 @@ void DATA::write_data_file_run_R1(int run) {  // open file & write file
 	Udata.close();
 }
 
-void DATA::write_data_file_run_B1(int run) {  // open file & write file
-	// if (mkdir("data B1", 0777) != 0) {
-	//     // new file
-	// }
+/**
+ * @brief Loads weight data for B1 scenario (User has 1 Blue piece left).
+ */
+void DATA::read_data_file_B1(int num) {
+	std::string E_filename = "./data B1/Edata_" + std::to_string(num) + ".csv";
+	std::ifstream iEdata(E_filename, std::ios::in);
 
+	if (!iEdata) {
+		printf("Add new B1 Edata.csv\n");
+		std::ofstream Edata;
+		Edata.open("Edata.csv", std::ios::out | std::ios::trunc);
+	} else {
+		std::string line;
+		bool first_line = 1;
+		while (getline(iEdata, line)) {
+			if (first_line) {
+				first_line = 0;
+				continue;
+				;
+			}
+			std::vector<std::string> a = _csv(line);
+			LUTw_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
+			LUTv_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
+			LUTwr_E_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
+		}
+	}
+
+	std::string U_filename = "./data B1/Udata_" + std::to_string(num) + ".csv";
+	std::ifstream iUdata(U_filename, std::ios::in);
+
+	if (!iUdata) {
+		printf("Add new B1 Udata.csv\n");
+		std::ofstream Udata;
+		Udata.open("Udata.csv", std::ios::out | std::ios::trunc);
+	} else {
+		std::string line;
+		bool first_line = 1;
+		while (getline(iUdata, line)) {
+			if (first_line) {
+				first_line = 0;
+				continue;
+			}
+			std::vector<std::string> a = _csv(line);
+			LUTw_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[2]);
+			LUTv_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stoll(a[3]);
+			LUTwr_U_B1[LUT_idx(std::stoll(a[0]), std::stoll(a[1]))] = std::stof(a[4]);
+		}
+	}
+}
+
+/**
+ * @brief Saves B1 scenario weights to CSV files.
+ */
+void DATA::write_data_file_run_B1(int run) {
 	std::ofstream Edata, Udata;
 
 	std::string E_filename = "data B1/Edata_" + std::to_string(run) + ".csv";

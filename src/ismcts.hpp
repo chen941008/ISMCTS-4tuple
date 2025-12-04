@@ -1,55 +1,136 @@
+/**
+ * @file ISMCTS.hpp
+ * @brief Definition of the Information Set Monte Carlo Tree Search (ISMCTS) class.
+ * @author Original Project Team (Inherited Code)
+ * @author Chen You-Kai (Optimization & Docs)
+ */
+
 #ifndef ISMCTS_HPP
 #define ISMCTS_HPP
 
 #include "4T_GST.hpp"
 #include "node.hpp"
 
-// =============================
-// ISMCTS (Information Set MCTS) 演算法類別
-// =============================
+/**
+ * @class ISMCTS
+ * @brief Implements Information Set Monte Carlo Tree Search (ISMCTS).
+ * * Unlike standard MCTS, ISMCTS is designed for games with imperfect information.
+ * It uses "Determinization" to sample concrete game states from the current information set
+ * before running MCTS iterations.
+ */
 class ISMCTS {
-private:
-    // 模擬次數（每回合執行的MCTS模擬數）
-    int simulations;
-    // 隨機數生成器
-    std::mt19937 rng;
-    // MCTS 樹的根節點
-    std::unique_ptr<Node> root;
+   private:
+	/// @name Configuration & State
+	/// @{
+	int simulations;			 ///< Number of simulations to perform per search
+	std::mt19937 rng;			 ///< Random number generator (Mersenne Twister)
+	std::unique_ptr<Node> root;	 ///< Root node of the search tree
 
-    // =============================
-    // MCTS 四大階段的私有方法
-    // =============================
-    // 節點選擇（根據 UCB）
-    void selection(Node*& node, GST& d);
-    // 節點擴展（產生所有合法子節點）
-    Node* expansion(Node* node, GST& determinizedState);
-    // 隨機模擬（模擬遊戲直到結束，回傳勝負）
-    double simulation(GST& state, DATA& d, int root_player);
-    // 反向傳播（將結果回傳至路徑上的所有節點）
-    void backpropagation(Node* leaf, double result);
-    // 計算 UCB 值（平衡探索與利用）
-    double calculateUCB(const Node* node) const;
-    // 取得確定化狀態（隨機化未知棋子顏色）
-    GST getDeterminizedState(const GST& originalState, int current_iteration);
-    // 隨機化未知顏色的棋子（早期純隨機，後期根據統計加權）
-    void randomizeUnrevealedPieces(GST& state, int current_iteration);
-    // 未知棋子排列的統計資料（排列字串 -> <勝場, 次數>）
-    std::unordered_map<std::string, std::pair<int, int>> arrangement_stats;
+	/**
+	 * @brief Statistics for unknown piece arrangements.
+	 * * Maps a string representation of a piece arrangement to a pair of <wins, count>.
+	 * * Used to bias determinization based on historical performance (Inference Strategy).
+	 */
+	std::unordered_map<std::string, std::pair<int, int>> arrangement_stats;
+	/// @}
 
-    // =============================
-    // 棋盤移動方向常量（上、左、右、下）
-    static constexpr int dir_val[4] = {-6, -1, 1, 6}; // 上、左、右、下
+	/// @name MCTS Core Stages
+	/// @{
+	/**
+	 * @brief Phase 1: Selection
+	 * * Traverses the tree based on UCB values using the specific determinized state.
+	 * @param node Reference to the current node pointer (updated during traversal).
+	 * @param d The determinized game state (concrete sample).
+	 */
+	void selection(Node*& node, GST& d);
 
-public:
-    // =============================
-    // 建構子：指定模擬次數
-    ISMCTS(int simulations);
-    // 重置 MCTS 狀態
-    void reset();
-    // 執行多次模擬，選出最佳移動
-    int findBestMove(GST& game, DATA& d);
-    // 輸出節點統計資訊（遞迴印出樹狀結構）
-    void printNodeStats(const Node* node, int indent = 0) const;
+	/**
+	 * @brief Phase 2: Expansion
+	 * * Expands the tree by adding ONE new child node.
+	 * * Identifies a legal move (valid in the determinized state) that has not yet
+	 * been expanded from the current node, creates a child for it, and returns it.
+	 * @param node Pointer to the leaf node to expand.
+	 * @param determinizedState The specific sampled state used for this iteration.
+	 * @return Node* Pointer to the newly created child node.
+	 */
+	Node* expansion(Node* node, GST& determinizedState);
+
+	/**
+	 * @brief Phase 3: Simulation (Rollout)
+	 * * Simulates a game to completion using a random or heuristic policy.
+	 * @param state The starting state for simulation.
+	 * @param d Shared data context.
+	 * @param root_player The ID of the player at the root (to calculate relative reward).
+	 * @return double The simulation result (reward).
+	 */
+	double simulation(GST& state, DATA& d, int root_player);
+
+	/**
+	 * @brief Phase 4: Backpropagation
+	 * * Propagates the simulation result up the tree, updating visit counts and win scores.
+	 * @param leaf The leaf node where simulation started.
+	 * @param result The outcome value to propagate.
+	 */
+	void backpropagation(Node* leaf, double result);
+	/// @}
+
+	/// @name Determinization & Helpers
+	/// @{
+	/**
+	 * @brief Calculates the Upper Confidence Bound (UCB1) value.
+	 * @param node The node to evaluate.
+	 * @return double The calculated UCB score.
+	 */
+	double calculateUCB(const Node* node) const;
+
+	/**
+	 * @brief Creates a concrete game state from the current information set.
+	 * * Samples a specific world by assigning colors/types to hidden pieces.
+	 * @param originalState The current game state with hidden info.
+	 * @param current_iteration Current simulation index (used for adaptive strategies).
+	 * @return GST A fully determined game state.
+	 */
+	GST getDeterminizedState(const GST& originalState, int current_iteration);
+
+	/**
+	 * @brief Randomizes unrevealed pieces on the board.
+	 * * Strategy may shift from pure random to statistically weighted based on 'current_iteration'.
+	 */
+	void randomizeUnrevealedPieces(GST& state, int current_iteration);
+	/// @}
+
+	/**
+	 * @brief Board movement direction offsets.
+	 * * Values: Up (-6), Left (-1), Right (+1), Down (+6).
+	 */
+	static constexpr int dir_val[4] = {-6, -1, 1, 6};
+
+   public:
+	/**
+	 * @brief Construct a new ISMCTS object.
+	 * @param simulations Number of iterations to run per search.
+	 */
+	ISMCTS(int simulations);
+
+	/**
+	 * @brief Resets the ISMCTS tree and state.
+	 */
+	void reset();
+
+	/**
+	 * @brief Executes ISMCTS to find the optimal move.
+	 * @param game The current game state (containing hidden info).
+	 * @param d Shared data object.
+	 * @return int The best move index found.
+	 */
+	int findBestMove(GST& game, DATA& d);
+
+	/**
+	 * @brief Debug helper: Recursively prints tree statistics.
+	 * @param node The node to start printing from.
+	 * @param indent Indentation level for visualization.
+	 */
+	void printNodeStats(const Node* node, int indent = 0) const;
 };
 
-#endif // ISMCTS_HPP
+#endif	// ISMCTS_HPP
