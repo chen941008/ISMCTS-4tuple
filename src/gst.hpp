@@ -55,7 +55,7 @@ class GST {
 	/// @{
 	int history[1000];	///< Move history stack for Undo
 	int n_plies;		///< Total plies (half-moves) played
-	/// @}
+						/// @}
 
    public:
 	/// @name Core Game Logic

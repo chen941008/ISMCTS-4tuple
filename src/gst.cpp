@@ -643,8 +643,8 @@ int GST::highest_weight(DATA& d) {
 				int dist_to_5 = p_row + (5 - p_col);
 				int dist_to_30 = (5 - p_row) + p_col;
 				int dist_to_35 = (5 - p_row) + (5 - p_col);
-				
 
+				// Add to list
 				pieces_distances.push_back(std::make_tuple(i, 0, dist_to_0));
 				pieces_distances.push_back(std::make_tuple(i, 1, dist_to_5));
 				pieces_distances.push_back(std::make_tuple(i, 2, dist_to_30));
