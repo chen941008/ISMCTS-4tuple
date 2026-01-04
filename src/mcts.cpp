@@ -85,6 +85,7 @@ void MCTS::selection(Node*& node, GST& state) {
 		for (auto& child : node->children) {
 			// If a child has never been visited, prioritize it immediately (Infinite UCB)
 			if (child->visits == 0) {
+				state.do_move(child->move);
 				node = child.get();
 				return;
 			}
@@ -96,9 +97,10 @@ void MCTS::selection(Node*& node, GST& state) {
 			}
 		}
 
-		if (bestChild)
+		if (bestChild) {
+			state.do_move(bestChild->move);
 			node = bestChild;
-		else
+		} else
 			break;
 	}
 }
@@ -191,13 +193,15 @@ int MCTS::findBestMove(GST& game) {
 	for (int i = 0; i < simulations; i++) {
 		Node* currentNode = root.get();
 
+		GST tempGame = game;
+
 		// Stage 1: Selection
-		selection(currentNode, game);
+		selection(currentNode, tempGame);
 
 		// Stage 2: Expansion
 		// Expand if node is a leaf and game is not over
-		if (currentNode->children.empty() && !game.is_over()) {
-			expansion(currentNode, game);
+		if (currentNode->children.empty() && !tempGame.is_over()) {
+			expansion(currentNode, tempGame);
 		}
 
 		// Determine which node to simulate
@@ -214,9 +218,9 @@ int MCTS::findBestMove(GST& game) {
 		// Stage 3: Simulation
 		GST simulationState = game;
 		if (nodeToSimulate->move != -1) {  // Apply move if not root
-			simulationState.do_move(nodeToSimulate->move);
+			tempGame.do_move(nodeToSimulate->move);
 		}
-		int result = simulation(simulationState);
+		int result = simulation(tempGame);
 
 		// Stage 4: Backpropagation
 		backpropagation(nodeToSimulate, result);
