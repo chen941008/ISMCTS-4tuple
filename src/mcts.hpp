@@ -8,8 +8,8 @@
 #ifndef MCTS_HPP
 #define MCTS_HPP
 
-#include "4T_GST.hpp"
 #include "4T_header.h"
+#include "BitboardGST.hpp"
 #include "node.hpp"
 
 /**
@@ -74,7 +74,7 @@ class MCTS {
 	 * @param dst The destination index.
 	 * @return true If the move captures a red piece.
 	 */
-	bool would_eat_enemy_red(const GST& game, int piece, int dst) const;
+	bool would_eat_enemy_red(const GST& state, int move) const;
 	/// @}
 
 	/**

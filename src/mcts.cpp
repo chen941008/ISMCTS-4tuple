@@ -40,7 +40,8 @@ void MCTS::reset() {
  * @brief Heuristic filter: Checks if a move targets an enemy Red piece.
  * * Used to prune or skip specific moves during expansion.
  */
-bool MCTS::would_eat_enemy_red(const GST& game, int piece, int dst) const {
+bool MCTS::would_eat_enemy_red(const GST& game, int move) const {
+	/*
 	int target_piece = game.piece_board[dst];
 	if (target_piece == -1) return false;
 
@@ -52,6 +53,21 @@ bool MCTS::would_eat_enemy_red(const GST& game, int piece, int dst) const {
 
 	int target_color = game.get_color(target_piece);
 	return std::abs(target_color) == RED;
+	*/
+	// 解析 Bitboard 移動格式: (From << 8) | To
+	int to = move & 0xFF;
+	uint64_t to_mask = 1ULL << to;
+
+	// 根據當前是誰的回合，來決定「誰是敵人的紅棋」
+	if (game.nowTurn == 0) {
+		// User 回合，檢查是否吃到 Enemy (Player 1) 的紅棋
+		if (game.emy_red & to_mask) return true;
+	} else {
+		// Enemy 回合，檢查是否吃到 User (Player 0) 的紅棋
+		if (game.my_red & to_mask) return true;
+	}
+
+	return false;
 }
 
 /**
@@ -118,12 +134,15 @@ void MCTS::expansion(Node* node, GST& state) {
 
 	for (int i = 0; i < moveCount; i++) {
 		int move = moves[i];
+		/*
 		int piece = move >> 4;
 		int dir = move & 0xf;
 		int dst = state.get_pos(piece) + dir_val[dir];
 
 		// Apply heuristic pruning
 		if (would_eat_enemy_red(state, piece, dst)) continue;
+		*/
+		if (would_eat_enemy_red(state, move)) continue;
 
 		// Create new child node
 		GST newState = state;
@@ -216,7 +235,6 @@ int MCTS::findBestMove(GST& game) {
 		}
 
 		// Stage 3: Simulation
-		GST simulationState = game;
 		if (nodeToSimulate->move != -1) {  // Apply move if not root
 			tempGame.do_move(nodeToSimulate->move);
 		}
@@ -236,7 +254,7 @@ int MCTS::findBestMove(GST& game) {
 			bestChild = child.get();
 		}
 	}
-
+	/*
 	// Optional: Debug Output
 	if (bestChild) {
 		int piece = bestChild->move >> 4;
@@ -250,6 +268,57 @@ int MCTS::findBestMove(GST& game) {
 			std::cout << static_cast<char>('a' + (piece - PIECES) % PIECES);
 		std::cout << " " << dirNames[direction] << std::endl;
 	}
+	*/
+	// Optional: Debug Output
+	if (bestChild) {
+		// 1. 解碼 Bitboard 移動格式
+		int move = bestChild->move;
+		int from = (move >> 8) & 0xFF;
+		int to = move & 0xFF;
 
+		// 2. 逆推方向 (Direction)
+		// Bitboard 不存方向，我們用 (to - from) 算出來
+		const char* dirNames[] = {"N", "W", "E", "S"};
+		int direction = -1;
+		int diff = to - from;
+
+		// 處理特殊逃脫座標 (60, 61)
+		if (to == 60) {
+			direction = 1;
+		}  // ESCAPE_LEFT (W)
+		else if (to == 61) {
+			direction = 2;
+		}  // ESCAPE_RIGHT (E)
+		else {
+			if (diff == -6)
+				direction = 0;	// N (-ROW)
+			else if (diff == -1)
+				direction = 1;	// W (-1)
+			else if (diff == 1)
+				direction = 2;	// E (+1)
+			else if (diff == 6)
+				direction = 3;	// S (+ROW)
+		}
+
+		std::cout << "MCTS Selected Move: ";
+
+		// 3. 印出棋子位置 (用座標代替 ID)
+		// 格式範例: "C4" (C行 4列)
+		// A~F 對應 col 0~5
+		if (from >= 0 && from < 36) {
+			char colChar = 'A' + (from % 6);
+			int rowNum = from / 6;
+			std::cout << colChar << rowNum;
+		} else {
+			std::cout << "??";	// 預防萬一
+		}
+
+		// 4. 印出方向
+		if (direction >= 0 && direction < 4) {
+			std::cout << " " << dirNames[direction];
+		}
+
+		std::cout << std::endl;
+	}
 	return bestChild ? bestChild->move : -1;
 }

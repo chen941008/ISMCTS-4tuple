@@ -10,6 +10,33 @@
 // Definition of static constant
 constexpr int ISMCTS::dir_val[4];
 
+#if defined(_MSC_VER)
+// Windows (Visual Studio) 環境
+#include <intrin.h>
+
+inline int popcount64(uint64_t b) { return __popcnt64(b); }
+
+inline int bit_scan_forward(uint64_t b) {
+	if (b == 0) return 64;
+	unsigned long index;
+	_BitScanForward64(&index, b);
+	return index;
+}
+
+#else
+// Mac / Linux (GCC, Clang) 環境
+// 這些是編譯器內建指令，所有現代 GCC/Clang 版本都支援
+
+inline int popcount64(uint64_t b) {
+	return __builtin_popcountll(b);	 // 注意：一定要用 ll (long long)
+}
+
+inline int bit_scan_forward(uint64_t b) {
+	if (b == 0) return 64;
+	return __builtin_ctzll(b);	// ctz = Count Trailing Zeros
+}
+#endif
+
 // =============================
 // Constructor & Lifecycle
 // =============================
@@ -54,117 +81,53 @@ GST ISMCTS::getDeterminizedState(const GST& originalState, int current_iteration
  * * - Later iterations: Weighted random based on historical win rates (Inference).
  */
 void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
-	const bool* revealed = state.get_revealed();
-	std::vector<int> unrevealed_pieces;
-	int redCount = 0, blueCount = 0;
+	// 1. 找出所有敵方棋子的位置 (Bitboard 掃描)
+	// 假設 ISMCTS 是站在 User (我方) 的角度思考，我們要隨機化的是 Enemy (敵方) 的配置
+	uint64_t enemy_mask = state.emy_red | state.emy_blue;
 
-	// 1. Identify all unrevealed pieces and count revealed colors
-	for (int i = PIECES; i < PIECES * 2; i++) {
-		if (revealed[i]) {
-			if (state.get_color(i) == -RED)
-				redCount++;
-			else
-				blueCount++;
-		} else {
-			unrevealed_pieces.push_back(i);
-		}
+	// 如果沒有敵人，直接返回
+	if (!enemy_mask) return;
+
+	std::vector<int> enemy_positions;
+	enemy_positions.reserve(8);
+
+	uint64_t temp_mask = enemy_mask;
+	while (temp_mask) {
+		int sq = bit_scan_forward(temp_mask);
+		enemy_positions.push_back(sq);
+		temp_mask &= temp_mask - 1;
 	}
 
-	int totalRed = 4;
-	int totalBlue = 4;
-	int redRemaining = totalRed - redCount;
-	int blueRemaining = totalBlue - blueCount;
+	// 2. 統計目前盤面上敵人的紅藍數量
+	// 注意：這裡是取 "當前 determinization" 的數量，通常這會符合真實剩餘數量
+	int red_count = popcount64(state.emy_red);
+	int blue_count = popcount64(state.emy_blue);
 
-	if (unrevealed_pieces.empty()) return;
+	// 3. 準備洗牌用的顏色包 (1: Red, 2: Blue)
+	std::vector<int> colors;
+	colors.reserve(8);
+	for (int i = 0; i < red_count; ++i) colors.push_back(1);
+	for (int i = 0; i < blue_count; ++i) colors.push_back(2);
 
-	// 2. Decide strategy based on iteration count
-	// Use inference stats only in the latter half of simulations
-	bool use_stats = (current_iteration >= simulations / 2);
+	// 4. 執行洗牌 (Strategy A: Pure Random)
+	// 註：原本的 Strategy B (Inference) 需要 Piece ID 才能追蹤特定組合的勝率。
+	// 在 Bitboard 化後，因為失去 ID，實作 Inference 變得非常複雜且效益不高。
+	// 建議先只使用純隨機洗牌，這在 ISMCTS 中已經非常強大。
+	std::shuffle(colors.begin(), colors.end(), rng);
 
-	if (!use_stats) {
-		// Strategy A: Pure Random Shuffle
-		std::shuffle(unrevealed_pieces.begin(), unrevealed_pieces.end(), rng);
-		for (size_t i = 0; i < unrevealed_pieces.size(); i++) {
-			int piece = unrevealed_pieces[i];
-			if (i < redRemaining) {
-				state.set_color(piece, -RED);
-			} else {
-				state.set_color(piece, -BLUE);
-			}
+	// 5. 將洗牌後的結果寫回 Bitboard
+	state.emy_red = 0;
+	state.emy_blue = 0;
+
+	for (size_t i = 0; i < enemy_positions.size(); ++i) {
+		int sq = enemy_positions[i];
+		int color = colors[i];
+
+		if (color == 1) {  // Red
+			state.emy_red |= (1ULL << sq);
+		} else {  // Blue
+			state.emy_blue |= (1ULL << sq);
 		}
-		return;
-	}
-
-	// Strategy B: Inference-based Weighted Shuffle
-	// Generate all valid arrangements of remaining pieces
-	std::vector<std::vector<int>> arrangements;
-	int total_pieces = redRemaining + blueRemaining;
-	int total_combinations = 1 << total_pieces;
-
-	for (int mask = 0; mask < total_combinations; mask++) {
-		std::vector<int> arrangement;
-		int red = 0, blue = 0;
-		for (int i = 0; i < total_pieces; i++) {
-			if (mask & (1 << i)) {
-				arrangement.push_back(-RED);
-				red++;
-			} else {
-				arrangement.push_back(-BLUE);
-				blue++;
-			}
-		}
-		if (red == redRemaining && blue == blueRemaining) {
-			arrangements.push_back(arrangement);
-		}
-	}
-
-	// Calculate win probability for each arrangement
-	std::vector<double> win_rates;
-	for (const auto& arrangement : arrangements) {
-		std::string key;
-		for (auto color : arrangement) {
-			key += (color == -RED) ? 'R' : 'B';
-		}
-
-		auto it = arrangement_stats.find(key);
-		if (it == arrangement_stats.end() || it->second.second == 0) {
-			win_rates.push_back(0.5);  // Default to 50% if no data
-		} else {
-			double win_rate = static_cast<double>(it->second.first) / it->second.second;
-			win_rates.push_back(win_rate);
-		}
-	}
-
-	// Calculate selection weights (inverse win rate logic to find harder scenarios?)
-	std::vector<double> weights;
-	double total_weight = 0.0;
-	for (double rate : win_rates) {
-		double weight = 1.0 - rate + 0.05;	// Add bias
-		weights.push_back(weight);
-		total_weight += weight;
-	}
-
-	for (auto& w : weights) {
-		w /= total_weight;
-	}
-
-	// Select an arrangement using weighted random distribution
-	std::uniform_real_distribution<> dist(0.0, 1.0);
-	double r = dist(rng);
-	double cumulative = 0.0;
-	int selected_idx = 0;
-	for (size_t i = 0; i < weights.size(); i++) {
-		cumulative += weights[i];
-		if (r <= cumulative) {
-			selected_idx = i;
-			break;
-		}
-	}
-
-	// Apply the selected arrangement to the state
-	const auto& selected_arrangement = arrangements[selected_idx];
-	for (size_t i = 0; i < unrevealed_pieces.size(); i++) {
-		state.set_color(unrevealed_pieces[i], selected_arrangement[i]);
 	}
 }
 
@@ -409,7 +372,7 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 
 		// Step D: Simulation
 		double result = simulation(determinizedState, d, root_player);
-
+		/*
 		// Step E: Update Inference Stats (Arrangement Win Rates)
 		std::string arrangementKey;
 		const bool* revealed = game.get_revealed();
@@ -422,6 +385,7 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 		auto& stats = arrangement_stats[arrangementKey];
 		if (result > 0) stats.first += 1;  // Wins
 		stats.second += 1;				   // Total simulations for this arrangement
+		*/
 
 		// Step F: Backpropagation
 		backpropagation(currentNode, result);
@@ -446,7 +410,7 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 		fprintf(stderr, "No valid moves found. This might indicate the game is already over.\n");
 		return -1;
 	}
-
+	/*
 	// Optional: Debug Output
 	if (bestChild) {
 		int piece = bestChild->move >> 4;
@@ -460,6 +424,50 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 	}
 
 	fprintf(stderr, "Returning Move: %d\n", bestChild->move);
+	*/
+	// Optional: Debug Output
+	if (bestChild) {
+		// 1. 解碼 Bitboard 移動格式
+		int move = bestChild->move;
+		int from = (move >> 8) & 0xFF;
+		int to = move & 0xFF;
+
+		// 2. 逆推方向 (Direction)
+		const char* dirName = "Unknown";
+		int diff = to - from;
+
+		// 處理特殊逃脫座標 (60, 61)
+		if (to == 60)
+			dirName = "ESC_L";	// ESCAPE_LEFT_TARGET
+		else if (to == 61)
+			dirName = "ESC_R";	// ESCAPE_RIGHT_TARGET
+		else {
+			if (diff == -6)
+				dirName = "N";	// Up (-ROW)
+			else if (diff == 6)
+				dirName = "S";	// Down (+ROW)
+			else if (diff == -1)
+				dirName = "W";	// Left (-1)
+			else if (diff == 1)
+				dirName = "E";	// Right (+1)
+		}
+
+		// 3. 將座標轉為 A0~F5 格式，方便閱讀
+		char colChar = 'A' + (from % 6);
+		int rowNum = from / 6;
+
+		// 印出：位置座標 -> 方向
+		fprintf(stderr, "ISMCTS Selected: Pos %c%d %s\n", colChar, rowNum, dirName);
+
+		// 印出勝率 (維持不變)
+		fprintf(stderr, "Win Rate: %.2f%% (Visits: %d)\n",
+				bestChild->visits > 0
+					? static_cast<double>(bestChild->wins) / bestChild->visits * 100
+					: 0.0,
+				bestChild->visits);
+	}
+
+	fprintf(stderr, "Returning Move: %d\n", bestChild ? bestChild->move : -1);
 
 	return bestChild->move;
 }
