@@ -27,11 +27,11 @@ class ISMCTS {
 	std::unique_ptr<Node> root;	 ///< Root node of the search tree
 
 	/**
-	 * @brief Statistics for unknown piece arrangements.
-	 * * Maps a string representation of a piece arrangement to a pair of <wins, count>.
-	 * * Used to bias determinization based on historical performance (Inference Strategy).
+	 * @brief 統計不同「猜測配置」的勝率 (Inference Strategy)
+	 * * Key: uint64_t (敵方紅色棋子的 Bitboard，這代表了唯一的顏色配置)
+	 * * Value: <勝場數(double), 總模擬數(int)>
 	 */
-	std::unordered_map<std::string, std::pair<int, int>> arrangement_stats;
+	std::unordered_map<uint64_t, std::pair<double, int>> arrangement_stats;
 	/// @}
 
 	/// @name MCTS Core Stages

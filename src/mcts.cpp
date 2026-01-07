@@ -19,7 +19,7 @@ constexpr int MCTS::dir_val[4];
  */
 MCTS::MCTS(int simulations) : simulations(simulations) {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-	rng.seed(static_cast<unsigned int>(seed));
+	rng.seed(0);
 }
 
 /**
@@ -27,7 +27,7 @@ MCTS::MCTS(int simulations) : simulations(simulations) {
  */
 void MCTS::reset() {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-	rng.seed(static_cast<unsigned int>(seed));
+	rng.seed(0);
 
 	Node::cleanup(root);
 }
@@ -235,9 +235,6 @@ int MCTS::findBestMove(GST& game) {
 		}
 
 		// Stage 3: Simulation
-		if (nodeToSimulate->move != -1) {  // Apply move if not root
-			tempGame.do_move(nodeToSimulate->move);
-		}
 		int result = simulation(tempGame);
 
 		// Stage 4: Backpropagation

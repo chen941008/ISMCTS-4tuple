@@ -46,7 +46,7 @@ inline int bit_scan_forward(uint64_t b) {
  */
 ISMCTS::ISMCTS(int simulations) : simulations(simulations) {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-	rng.seed(static_cast<unsigned int>(seed));
+	rng.seed(0);
 }
 
 /**
@@ -54,7 +54,7 @@ ISMCTS::ISMCTS(int simulations) : simulations(simulations) {
  */
 void ISMCTS::reset() {
 	auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-	rng.seed(static_cast<unsigned int>(seed));
+	rng.seed(0);
 
 	Node::cleanup(root);
 	arrangement_stats.clear();
@@ -81,54 +81,130 @@ GST ISMCTS::getDeterminizedState(const GST& originalState, int current_iteration
  * * - Later iterations: Weighted random based on historical win rates (Inference).
  */
 void ISMCTS::randomizeUnrevealedPieces(GST& state, int current_iteration) {
-	// 1. 找出所有敵方棋子的位置 (Bitboard 掃描)
-	// 假設 ISMCTS 是站在 User (我方) 的角度思考，我們要隨機化的是 Enemy (敵方) 的配置
-	uint64_t enemy_mask = state.emy_red | state.emy_blue;
+	// 1. 判斷誰是「對手」(Unknown Side)
+	uint64_t* target_red_ptr;
+	uint64_t* target_blue_ptr;
+	// 用來查表時判斷視角的基準 (誰在思考，誰就是 Root)
+	int root_player_for_stats = state.nowTurn;
 
-	// 如果沒有敵人，直接返回
-	if (!enemy_mask) return;
+	if (state.nowTurn == 0) {  // 我是 User
+		target_red_ptr = &state.emy_red;
+		target_blue_ptr = &state.emy_blue;
+	} else {  // 我是 Enemy
+		target_red_ptr = &state.my_red;
+		target_blue_ptr = &state.my_blue;
+	}
 
-	std::vector<int> enemy_positions;
-	enemy_positions.reserve(8);
+	// 2. 找出所有「對手」棋子的位置 (Bitboard 掃描)
+	uint64_t opponent_mask = *target_red_ptr | *target_blue_ptr;
+	if (!opponent_mask) return;
 
-	uint64_t temp_mask = enemy_mask;
+	std::vector<int> opponent_positions;
+	opponent_positions.reserve(16);
+
+	uint64_t temp_mask = opponent_mask;
 	while (temp_mask) {
 		int sq = bit_scan_forward(temp_mask);
-		enemy_positions.push_back(sq);
+		opponent_positions.push_back(sq);
 		temp_mask &= temp_mask - 1;
 	}
 
-	// 2. 統計目前盤面上敵人的紅藍數量
-	// 注意：這裡是取 "當前 determinization" 的數量，通常這會符合真實剩餘數量
-	int red_count = popcount64(state.emy_red);
-	int blue_count = popcount64(state.emy_blue);
+	// 3. 準備顏色包 (1: Red, 2: Blue)
+	int red_count = popcount64(*target_red_ptr);
+	int blue_count = popcount64(*target_blue_ptr);
 
-	// 3. 準備洗牌用的顏色包 (1: Red, 2: Blue)
 	std::vector<int> colors;
-	colors.reserve(8);
+	colors.reserve(16);
 	for (int i = 0; i < red_count; ++i) colors.push_back(1);
 	for (int i = 0; i < blue_count; ++i) colors.push_back(2);
 
-	// 4. 執行洗牌 (Strategy A: Pure Random)
-	// 註：原本的 Strategy B (Inference) 需要 Piece ID 才能追蹤特定組合的勝率。
-	// 在 Bitboard 化後，因為失去 ID，實作 Inference 變得非常複雜且效益不高。
-	// 建議先只使用純隨機洗牌，這在 ISMCTS 中已經非常強大。
-	std::shuffle(colors.begin(), colors.end(), rng);
+	// =================================================================
+	// 策略分歧點 (復刻原版邏輯)
+	// =================================================================
 
-	// 5. 將洗牌後的結果寫回 Bitboard
-	state.emy_red = 0;
-	state.emy_blue = 0;
+	// 只有在後半段模擬才使用推論統計 (Inference Stats)
+	bool use_stats = (current_iteration >= simulations / 2);
 
-	for (size_t i = 0; i < enemy_positions.size(); ++i) {
-		int sq = enemy_positions[i];
-		int color = colors[i];
+	if (!use_stats) {
+		// [Strategy A] 純隨機洗牌 (Pure Random Shuffle)
+		std::shuffle(colors.begin(), colors.end(), rng);
 
-		if (color == 1) {  // Red
-			state.emy_red |= (1ULL << sq);
-		} else {  // Blue
-			state.emy_blue |= (1ULL << sq);
+		// 寫回 Bitboard
+		*target_red_ptr = 0;
+		*target_blue_ptr = 0;
+		for (size_t i = 0; i < opponent_positions.size(); ++i) {
+			if (colors[i] == 1)
+				*target_red_ptr |= (1ULL << opponent_positions[i]);
+			else
+				*target_blue_ptr |= (1ULL << opponent_positions[i]);
+		}
+		return;
+	}
+
+	// [Strategy B] 基於推論的加權洗牌 (Inference-based Weighted Shuffle)
+	// 目標：窮舉所有可能的顏色排列，計算權重，然後選一個
+
+	// 1. 必須先排序，這是 std::next_permutation 的要求
+	std::sort(colors.begin(), colors.end());
+
+	struct Candidate {
+		uint64_t red_config;
+		double weight;
+	};
+	std::vector<Candidate> candidates;
+	double total_weight = 0.0;
+
+	// 2. 窮舉所有排列 (Generate All Arrangements)
+	// 暗棋最多 4紅4藍，排列組合數 C(8,4)=70，迴圈次數很少，效能極高
+	do {
+		// 根據當前排列，組合成一個暫時的紅棋 Bitboard
+		uint64_t tmp_red = 0;
+		for (size_t i = 0; i < opponent_positions.size(); ++i) {
+			if (colors[i] == 1) {  // Red
+				tmp_red |= (1ULL << opponent_positions[i]);
+			}
+		}
+
+		// 3. 查表計算勝率 (Calculate Win Rate)
+		// Key 就是紅棋的 Bitboard (tmp_red)
+		auto it = arrangement_stats.find(tmp_red);
+		double win_rate = 0.5;	// 預設 50%
+
+		if (it != arrangement_stats.end() && it->second.second > 0) {
+			win_rate = it->second.first / (double)it->second.second;
+		}
+
+		// 4. 計算權重 (Inverse Win Rate Logic)
+		// 邏輯：選擇那些「讓我方勝率低」(即敵人很強) 的配置，進行針對性訓練
+		// Bias 0.05 是為了避免權重為 0
+		double weight = 1.0 - win_rate + 0.05;
+
+		candidates.push_back({tmp_red, weight});
+		total_weight += weight;
+
+	} while (std::next_permutation(colors.begin(), colors.end()));
+
+	// 5. 加權隨機選擇 (Weighted Random Selection)
+	std::uniform_real_distribution<> dist(0.0, total_weight);
+	double r = dist(rng);
+	double cumulative = 0.0;
+	uint64_t selected_red_config = 0;
+
+	// 如果因為某些原因沒生成候選者 (防呆)，預設用最後一個
+	if (!candidates.empty()) selected_red_config = candidates.back().red_config;
+
+	for (const auto& cand : candidates) {
+		cumulative += cand.weight;
+		if (r <= cumulative) {
+			selected_red_config = cand.red_config;
+			break;
 		}
 	}
+
+	// 6. 將選中的配置應用到 State
+	*target_red_ptr = selected_red_config;
+	// 藍棋就是「所有位置」扣掉「紅棋位置」
+	*target_blue_ptr = opponent_mask ^ selected_red_config;
 }
 
 // =============================
@@ -372,20 +448,27 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 
 		// Step D: Simulation
 		double result = simulation(determinizedState, d, root_player);
-		/*
-		// Step E: Update Inference Stats (Arrangement Win Rates)
-		std::string arrangementKey;
-		const bool* revealed = game.get_revealed();
-		for (int i = PIECES; i < PIECES * 2; i++) {
-			if (!revealed[i]) {
-				int color = determinizedState.get_color(i);
-				arrangementKey += (color == -RED ? 'R' : 'B');
-			}
+
+		// =========================================================
+		// Step E: Update Inference Stats (Bitboard Version)
+		// =========================================================
+
+		// 取得代表這次「猜測配置」的唯一 Key
+		// 如果我是 User，我在猜 Enemy 的紅棋位置 (emy_red)
+		// 如果我是 Enemy，我在猜 User 的紅棋位置 (my_red)
+		uint64_t arrangementKey = 0;
+		if (root_player == 0) {
+			arrangementKey = determinizedState.emy_red;
+		} else {
+			arrangementKey = determinizedState.my_red;
 		}
+
+		// 存入 Map
+		// stats.first: 勝場數 (累積 result, 贏是+1)
+		// stats.second: 該配置被模擬的總次數
 		auto& stats = arrangement_stats[arrangementKey];
-		if (result > 0) stats.first += 1;  // Wins
-		stats.second += 1;				   // Total simulations for this arrangement
-		*/
+		if (result > 0) stats.first += 1.0;
+		stats.second += 1;
 
 		// Step F: Backpropagation
 		backpropagation(currentNode, result);

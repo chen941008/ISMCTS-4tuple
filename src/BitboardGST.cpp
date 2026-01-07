@@ -73,7 +73,7 @@ inline int bit_scan_forward(uint64_t b) {
 // ==========================================
 // 轉接頭結束，下面是你的邏輯代碼
 // ==========================================
-static thread_local pcg32 rng(std::random_device{}());
+static thread_local pcg32 rng(0);
 
 // Helper lambda: Generates double u in [0, 1)
 auto next_u01 = []() {
@@ -211,7 +211,7 @@ float GST::predict_move_weight(int move, DATA& d) {
 	// 因為 N-Tuple 通常只評估盤面，不懂「遊戲結束」的規則
 	int to = move & 0xFF;
 	if (to == ESCAPE_LEFT_TARGET || to == ESCAPE_RIGHT_TARGET) {
-		return 999999.0f;  // 必勝移動，直接最高分
+		return 1.0f;  // 必勝移動，直接最高分
 	}
 
 	// A. 快速備份當前狀態到「區域變數」 (Register Copy)
@@ -846,11 +846,10 @@ float GST::compute_board_weight(DATA& d) {
 }
 
 int GST::highest_weight(DATA& d) {
-	// 準備權重陣列
 	float WEIGHT[MAX_MOVES] = {0};
-	// 這裡為了保險起見，設大一點，雖然 gen_all_move 通常不會超過 32
-	int root_moves[MAX_MOVES * 2];
-	int root_nmove = gen_all_move(root_moves);
+	int root_nmove;
+	int root_moves[MAX_MOVES];
+	root_nmove = gen_all_move(root_moves);
 
 	// ==========================================
 	// 1. 角落策略 (Corner Heuristics) - Bitboard 版
@@ -931,7 +930,11 @@ int GST::highest_weight(DATA& d) {
 		// 簡單逆推一下：
 		int diff = to - from;
 		int direction = -1;
-		if (diff == -6)
+		if (to == ESCAPE_LEFT_TARGET)
+			direction = 1;	// 左邊逃脫視為向左 (West)
+		else if (to == ESCAPE_RIGHT_TARGET)
+			direction = 2;	// 右邊逃脫視為向右 (East)
+		else if (diff == -6)
 			direction = 0;	// Up
 		else if (diff == -1)
 			direction = 1;	// Left
@@ -943,6 +946,7 @@ int GST::highest_weight(DATA& d) {
 		// 判斷該棋子顏色 (用於特殊規則)
 		bool is_my_blue = (nowTurn == 0) ? (my_blue & (1ULL << from)) : (emy_blue & (1ULL << from));
 		bool is_my_red = (nowTurn == 0) ? (my_red & (1ULL << from)) : (emy_red & (1ULL << from));
+		bool is_special_move = false;
 
 		// ---------------------------------------------------
 		// 特殊寫死規則 (Hardcoded Heuristics) - Bitboard 版
@@ -951,61 +955,65 @@ int GST::highest_weight(DATA& d) {
 		// 規則 1: 藍棋已經在門口，且往外走 -> 必勝 (權重 1.0)
 		// pos[piece] == 0 && direction == 1 (Left) && nowTurn == USER && board[0] == BLUE
 		if (from == 0 && direction == 1 && nowTurn == 0 && is_my_blue) {
-			WEIGHT[move_index] = 1;
+			WEIGHT[move_index] = 999999.0;
+			is_special_move = true;
 		} else if (from == 5 && direction == 2 && nowTurn == 0 && is_my_blue) {
-			WEIGHT[move_index] = 1;
+			WEIGHT[move_index] = 999999.0;
+			is_special_move = true;
 		} else if (from == 30 && direction == 1 && nowTurn == 1 && is_my_blue) {
-			WEIGHT[move_index] = 1;
+			WEIGHT[move_index] = 999999.0;
+			is_special_move = true;
 		} else if (from == 35 && direction == 2 && nowTurn == 1 && is_my_blue) {
-			WEIGHT[move_index] = 1;
+			WEIGHT[move_index] = 999999.0;
+			is_special_move = true;
 		}
 		// 規則 2: 藍棋準備衝門 (Checkmate Setups)
-		// pos == 4, move Right(2), USER, Blue. If board[5] empty & board[11] occupied(blocked?)
-		// 原意：如果 5 是空的，且 11 有棋子(可能擋住敵人?)，就衝過去
+		// 注意：請確保在此段落上方（Rule 1 之前）有宣告 bool is_special_move = false;
 		else if (from == 4 && direction == 2 && nowTurn == 0 && is_my_blue) {
-			// board[5] == 0: 檢查 (my_all | emy_all) & (1<<5) 是否為 0
 			bool pos5_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 5));
-			// board[11] >= 0: 原意是 User(>=0) 或 Empty(0)。也就是沒有敵人(<0)。
-			// Bitboard: !((emy_red | emy_blue) & (1<<11))
 			bool pos11_safe = !((emy_red | emy_blue) & (1ULL << 11));
 
-			if (pos5_empty && pos11_safe)
-				WEIGHT[move_index] = 1;
-			else
-				goto GENERAL_EVAL;
+			if (pos5_empty && pos11_safe) {
+				WEIGHT[move_index] = 1.0f;	// 給予高分 (1.0)
+				is_special_move = true;		// 標記已處理
+			}
+			// 如果條件不符，is_special_move 保持 false，自然會流到下面的一般評估
 		} else if (from == 1 && direction == 1 && nowTurn == 0 && is_my_blue) {
 			bool pos0_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 0));
 			bool pos6_safe = !((emy_red | emy_blue) & (1ULL << 6));
 
-			if (pos0_empty && pos6_safe)
-				WEIGHT[move_index] = 1;
-			else
-				goto GENERAL_EVAL;
+			if (pos0_empty && pos6_safe) {
+				WEIGHT[move_index] = 1.0f;
+				is_special_move = true;
+			}
 		}
-		// Enemy mirror cases
+		// Enemy mirror cases (敵方鏡像規則)
 		else if (from == 34 && direction == 2 && nowTurn == 1 && is_my_blue) {
 			bool pos35_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 35));
-			// board[29] <= 0: Enemy or Empty. i.e., No User.
-			bool pos29_safe = !((my_red | my_blue) & (1ULL << 29));
+			bool pos29_safe =
+				!((my_red | my_blue) &
+				  (1ULL << 29));  // 修正：應檢查該位置是否有我方棋子擋路或單純判斷安全
 
-			if (pos35_empty && pos29_safe)
-				WEIGHT[move_index] = 1;
-			else
-				goto GENERAL_EVAL;
+			if (pos35_empty && pos29_safe) {
+				WEIGHT[move_index] = 1.0f;
+				is_special_move = true;
+			}
 		} else if (from == 31 && direction == 1 && nowTurn == 1 && is_my_blue) {
 			bool pos30_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 30));
 			bool pos24_safe = !((my_red | my_blue) & (1ULL << 24));
 
-			if (pos30_empty && pos24_safe)
-				WEIGHT[move_index] = 1;
-			else
-				goto GENERAL_EVAL;
-		} else {
-		GENERAL_EVAL:
-			// ---------------------------------------------------
-			// 一般評估：使用快速預判 (Predict Move)
-			// ---------------------------------------------------
-			// 這取代了原本的 do_move -> compute -> undo
+			if (pos30_empty && pos24_safe) {
+				WEIGHT[move_index] = 1.0f;
+				is_special_move = true;
+			}
+		}
+
+		// ===================================================
+		// 一般評估 (General Eval)
+		// ===================================================
+		// 這裡不再用 else 包住，也不用 goto 跳過來
+		// 只要上面沒有任何規則將 is_special_move 設為 true，就會執行這裡
+		if (!is_special_move) {
 			WEIGHT[move_index] = predict_move_weight(mv, d);
 		}
 
@@ -1162,6 +1170,73 @@ int GST::highest_weight(DATA& d) {
 	return root_moves[chosen_idx];
 }
 
+// 輔助函式：將移動和棋盤狀態寫入檔案
+void log_to_file(std::ofstream& file, GST& game, int move, int player_id, int turn_count) {
+	if (!file.is_open()) return;
+
+	// 1. 解析移動 (Decode Move)
+	int from = (move >> 8) & 0xFF;
+	int to = move & 0xFF;
+
+	// 轉換座標顯示 (例如 0 -> A0)
+	auto to_coord = [](int pos) -> std::string {
+		if (pos == 60) return "ESCAPE(Left)";
+		if (pos == 61) return "ESCAPE(Right)";
+		char col = 'A' + (pos % 6);
+		int row = pos / 6;
+		return std::string(1, col) + std::to_string(row);
+	};
+
+	std::string player_name = (player_id == 0) ? "Player 1 (ISMCTS)" : "Player 2 (MCTS)";
+
+	file << "========================================\n";
+	file << "回合: " << turn_count << " | " << player_name << "\n";
+	file << "移動: " << to_coord(from) << " -> " << to_coord(to) << "\n";
+	file << "----------------------------------------\n";
+
+	// 2. 繪製棋盤 (複製原本 print_board 的邏輯，但改用 file <<)
+	file << "   A   B   C   D   E   F\n";
+	file << " +-----------------------+\n";
+
+	for (int row = 0; row < 6; row++) {
+		file << row << "|";
+		for (int col = 0; col < 6; col++) {
+			int sq = row * 6 + col;
+			uint64_t mask = 1ULL << sq;
+
+			if (game.my_red & mask)
+				file << " R  ";
+			else if (game.my_blue & mask)
+				file << " B  ";
+			else if (game.emy_red & mask)
+				file << " r  ";
+			else if (game.emy_blue & mask)
+				file << " b  ";
+			else {
+				if (row == 0 && col == 0)
+					file << " <  ";
+				else if (row == 0 && col == 5)
+					file << " >  ";
+				else
+					file << " .  ";
+			}
+		}
+		file << "|\n";
+	}
+	file << " +-----------------------+\n";
+
+	// 3. 顯示剩餘棋子資訊
+	// 這裡需要用 popcount64，如果在 main 裡沒有定義，可能需要用 __builtin_popcountll 或手動呼叫
+	// 假設你可以存取 popcount64 (通常在 helper header 裡)
+	// 如果編譯報錯說找不到 popcount64，可以暫時拿掉下面這幾行
+	/*
+	file << "My(Red/Blue): " << popcount64(game.my_red) << "/" << popcount64(game.my_blue) << "\n";
+	file << "Emy(Red/Blue): " << popcount64(game.emy_red) << "/" << popcount64(game.emy_blue) <<
+	"\n";
+	*/
+	file << "\n";
+	file.flush();  // 確保立即寫入
+}
 // ==========================================
 // Main Application Entry
 // ==========================================
@@ -1181,6 +1256,8 @@ int main() {
 
 	GameStats stats;
 	stats.total_games = num_games;
+
+	std::ofstream logFile("game_log.txt", std::ios::out | std::ios::trunc);
 
 	if (num_games > 1) {
 		std::cout << "\n開始進行多場遊戲模擬...\n";
@@ -1205,7 +1282,11 @@ int main() {
 		} else {
 			print_progress_bar(game_num - 1, num_games);
 		}
-
+		if (logFile.is_open()) {
+			logFile << "\n****************************************\n";
+			logFile << "Game #" << game_num << " Start\n";
+			logFile << "****************************************\n\n";
+		}
 		// Main Game Loop
 		while (!game.is_over()) {
 			if (my_turn) {
@@ -1219,11 +1300,13 @@ int main() {
 				stats.ismcts_total_times +=
 					std::chrono::duration<double, std::milli>(end - start).count();
 				if (move == -1) break;
+				log_to_file(logFile, game, move, 0, game.n_plies + 1);
 				game.do_move(move);
 			} else {
 				if (num_games == 1) std::cout << "Player 2 (MCTS) 思考中...\n";
 				int move = mcts.findBestMove(game);
 				if (move == -1) break;
+				log_to_file(logFile, game, move, 0, game.n_plies + 1);
 				game.do_move(move);
 			}
 
@@ -1277,6 +1360,11 @@ int main() {
 					printf("勝利方式：Player 2 的藍色棋子全部被吃光！\n");
 				}
 			}
+		}
+		if (logFile.is_open()) {
+			int w = game.get_winner();
+			logFile << "Game Over! Winner: "
+					<< (w == -2 ? "Draw" : (w == 0 ? "Player 1" : "Player 2")) << "\n";
 		}
 	}
 

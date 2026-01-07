@@ -920,9 +920,9 @@ int main() {
 	std::random_device rd;
 	std::uniform_int_distribution<> dist(0, 7);
 
-	int num_games;
+	int num_games = 100;
 	std::cout << "請輸入要進行的遊戲場數: ";
-	std::cin >> num_games;
+	// std::cin >> num_games;
 
 	data.init_data();
 	data.read_data_file(500000);
