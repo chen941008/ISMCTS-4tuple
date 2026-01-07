@@ -126,6 +126,20 @@ g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_i
 ./gst_softmax
 ```
 
+線性權重：
+
+```bash
+g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_linear -DSELECTION_MODE=1
+./gst_linear
+```
+
+Argmax：
+
+```bash
+g++ -std=c++14 -O2 ../gst.cpp ../ismcts.cpp ../mcts.cpp ../node.cpp ../4T_DATA_impl.cpp -o gst_argmax -DSELECTION_MODE=0
+./gst_argmax
+```
+
 ---
 
 ## 盤面相關
