@@ -216,10 +216,6 @@ int MCTS::findBestMove(GST& game) {
 		}
 
 		// Stage 3: Simulation
-		GST simulationState = game;
-		if (nodeToSimulate->move != -1) {  // Apply move if not root
-			tempGame.do_move(nodeToSimulate->move);
-		}
 		int result = simulation(tempGame);
 
 		// Stage 4: Backpropagation
