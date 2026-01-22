@@ -11,22 +11,11 @@
 #include "4T_DATA.hpp"
 
 // 棋盤遮罩 (只取低 36 位元)
-constexpr uint64_t BOARD_MASK = 0xFFFFFFFFF;
-
-// 邊界遮罩：防止左右移動時「穿牆」
-// A 行 (Col 0) 的所有位置 (0, 6, 12, 18, 24, 30)
-constexpr uint64_t NOT_FILE_A = 0xAAAAAAAAA;  // Binary: ...101010
-// F 行 (Col 5) 的所有位置 (5, 11, 17, 23, 29, 35)
-constexpr uint64_t NOT_FILE_F = 0x555555555;  // Binary: ...010101
-
-// 特殊移動代碼 (用於逃脫勝利)
-// 設定為 60, 61 是因為棋盤只有 0~35，這些數字不會衝突
-constexpr int ESCAPE_LEFT_TARGET = 60;
-constexpr int ESCAPE_RIGHT_TARGET = 61;
+constexpr uint64_t BOARD_MASK = 0x7E7E7E7E7E7E00;
 
 // 用來儲存預先計算好的 Pattern 資訊
 struct PatternInfo {
-	int sq[4];		// 該 Pattern 包含的 4 個格子位置 (0~35)
+	int sq[4];		// 該 Pattern 包含的 4 個格子位置 (0~63)
 	int trans_idx;	// 對應權重檔中的 Address (從 d.trans 查來的)
 };
 

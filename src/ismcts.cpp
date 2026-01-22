@@ -489,6 +489,64 @@ int ISMCTS::findBestMove(GST& game, DATA& d) {
 		}
 	}
 
+	{
+		// 使用 append 模式 (std::ios::app)，這樣資料會一直往下寫而不會覆蓋
+		static std::ofstream tlog("ismcts_tree_debug_log.txt", std::ios::out | std::ios::app);
+
+		if (tlog.is_open()) {
+			tlog << "--------------------------------------------------\n";
+			tlog << "ISMCTS Root Stats | Turn: " << (game.nowTurn == 0 ? "USER" : "ENEMY") << "\n";
+
+			// 為了方便閱讀，我們把子節點依照「訪問次數」由高到低排序
+			std::vector<Node*> sortedChildren;
+			sortedChildren.reserve(root->children.size());
+			for (auto& c : root->children) {
+				sortedChildren.push_back(c.get());
+			}
+			std::sort(sortedChildren.begin(), sortedChildren.end(), [](Node* a, Node* b) {
+				return a->visits > b->visits;  // 降冪排序
+			});
+
+			for (Node* child : sortedChildren) {
+				int move = child->move;
+				int from = (move >> 8) & 0xFF;
+				int to = move & 0xFF;
+
+				// --- 座標轉字串 Helper (與 BitboardGST.cpp 邏輯一致) ---
+				auto to_str = [&](int idx, bool is_dest) -> std::string {
+					if (is_dest) {
+						if (idx == 8 || idx == 48) return "ESC_L";
+						if (idx == 15 || idx == 55) return "ESC_R";
+					}
+					int p_row = idx / 8;
+					int p_col = idx % 8;
+					int l_row = p_row - 1;
+					int l_col = p_col - 1;
+					if (l_row < 0 || l_row > 5 || l_col < 0 || l_col > 5) return "OUT";
+					char c = 'A' + l_col;
+					return std::string(1, c) + std::to_string(l_row);
+				};
+
+				std::string from_s = to_str(from, false);
+				std::string to_s = to_str(to, true);
+
+				// 計算勝率
+				double winRate = (child->visits > 0)
+									 ? (static_cast<double>(child->wins) / child->visits * 100.0)
+									 : 0.0;
+
+				// 寫入檔案：移動 | 訪問數 | 勝場 | 勝率
+				tlog << "Move: " << from_s << " -> " << to_s << " | Visits: " << std::setw(5)
+					 << child->visits << " | Wins: " << std::setw(6) << std::fixed
+					 << std::setprecision(1) << child->wins << " | Rate: " << std::setw(5)
+					 << std::fixed << std::setprecision(1) << winRate << "%"
+					 << "\n";
+			}
+			tlog << std::endl;	// 空一行分隔
+			tlog.flush();
+		}
+	}
+
 	if (!hasValidMoves) {
 		fprintf(stderr, "No valid moves found. This might indicate the game is already over.\n");
 		return -1;

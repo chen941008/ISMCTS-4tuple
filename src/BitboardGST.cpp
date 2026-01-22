@@ -88,7 +88,7 @@ std::vector<PatternInfo> GST::pat_4x1;
 // ==========================================
 // 輔助函式 (僅用於初始化階段，複製原本的 Array 邏輯)
 // ==========================================
-static bool _is_valid(int base_pos, const int* offset) {
+static bool _is_valid_logical(int base_pos, const int* offset) {
 	int base_row = base_pos / 6;
 	int base_col = base_pos % 6;
 	if (offset[1] == 1 && offset[2] == 2) {	 // 1x4
@@ -210,8 +210,8 @@ float GST::predict_move_weight(int move, DATA& d) {
 	// 0. 特殊檢查：如果是逃脫步 (Escape Move)，直接回傳極高分
 	// 因為 N-Tuple 通常只評估盤面，不懂「遊戲結束」的規則
 	int to = move & 0xFF;
-	if (to == ESCAPE_LEFT_TARGET || to == ESCAPE_RIGHT_TARGET) {
-		return 1.0f;  // 必勝移動，直接最高分
+	if (!(((to & 7) + 1) & 6)) {  // 逃脫位置
+		return 1.0f;			  // 必勝移動，直接最高分
 	}
 
 	// A. 快速備份當前狀態到「區域變數」 (Register Copy)
@@ -274,8 +274,8 @@ void GST::init_board() {
 
 	// 定義初始位置 (完全對照原版 gst.cpp)
 	static const int init_pos[2][8] = {
-		{25, 26, 27, 28, 31, 32, 33, 34},  // User (Player 0)
-		{10, 9, 8, 7, 4, 3, 2, 1}		   // Enemy (Player 1)
+		{42, 43, 44, 45, 50, 51, 52, 53},  // User (Player 0)
+		{21, 20, 19, 18, 13, 12, 11, 10}   // Enemy (Player 1)
 	};
 
 	// ==========================================
@@ -343,9 +343,6 @@ int GST::gen_all_move(int* move_arr) {
 		int from = bit_scan_forward(temp_us);  // 找出棋子位置 (等同 bit_scan_forward)
 		temp_us &= temp_us - 1;				   // 移除這顆棋子
 
-		// 【精華】直接查表，並扣除自己人的位置
-		// KING_MOVES[from]: 這顆棋子能去哪
-		// ~us: 不能是自己人的位置
 		uint64_t valid_targets = KING_MOVES[from] & ~us;
 
 		// 遍歷所有合法目標 (沒有 if 判斷了！)
@@ -361,28 +358,28 @@ int GST::gen_all_move(int* move_arr) {
 	// 特殊移動：藍棋逃脫
 	// ------------------------------------------------
 
-	constexpr uint64_t MASK_POS_0 = 1ULL << 0;
-	constexpr uint64_t MASK_POS_5 = 1ULL << 5;
-	constexpr uint64_t MASK_POS_30 = 1ULL << 30;
-	constexpr uint64_t MASK_POS_35 = 1ULL << 35;
+	constexpr uint64_t MASK_POS_9 = 1ULL << 9;
+	constexpr uint64_t MASK_POS_14 = 1ULL << 14;
+	constexpr uint64_t MASK_POS_49 = 1ULL << 49;
+	constexpr uint64_t MASK_POS_54 = 1ULL << 54;
 
 	if (nowTurn == 0) {	 // User Turn
 		// 檢查 Pos 0 (直接 AND Mask，非 0 即為真)
-		if (my_blue & MASK_POS_0) {
-			move_arr[count++] = (0 << 8) | ESCAPE_LEFT_TARGET;
+		if (my_blue & MASK_POS_9) {
+			move_arr[count++] = (9 << 8) | 8;
 		}
 		// 檢查 Pos 5
-		if (my_blue & MASK_POS_5) {
-			move_arr[count++] = (5 << 8) | ESCAPE_RIGHT_TARGET;
+		if (my_blue & MASK_POS_14) {
+			move_arr[count++] = (14 << 8) | 15;
 		}
 	} else {  // Enemy Turn
 		// 檢查 Pos 30
-		if (emy_blue & MASK_POS_30) {
-			move_arr[count++] = (30 << 8) | ESCAPE_LEFT_TARGET;
+		if (emy_blue & MASK_POS_49) {
+			move_arr[count++] = (49 << 8) | 48;
 		}
 		// 檢查 Pos 35
-		if (emy_blue & MASK_POS_35) {
-			move_arr[count++] = (35 << 8) | ESCAPE_RIGHT_TARGET;
+		if (emy_blue & MASK_POS_54) {
+			move_arr[count++] = (54 << 8) | 55;
 		}
 	}
 
@@ -392,7 +389,7 @@ int GST::gen_all_move(int* move_arr) {
 bool GST::check_win_move(int move) {
 	int to = move & 0xFF;
 
-	if (to == ESCAPE_LEFT_TARGET || to == ESCAPE_RIGHT_TARGET) {
+	if (!(((to & 7) + 1) & 6)) {
 		return true;
 	}
 
@@ -498,7 +495,7 @@ void GST::undo() {
 	// ==========================================
 	// 3. 處理特殊勝利 (Escape) 的倒帶
 	// ==========================================
-	if (to == ESCAPE_LEFT_TARGET || to == ESCAPE_RIGHT_TARGET) {
+	if (!(((to & 7) + 1) & 6)) {
 		// 把逃走的棋子放回 `from`
 		if (nowTurn == 0)
 			my_blue |= from_mask;
@@ -599,14 +596,20 @@ void GST::print_board() {
 	// r: 敵方紅 (Enemy Red) - 用小寫區分
 	// b: 敵方藍 (Enemy Blue) - 用小寫區分
 
-	printf("\n   A   B   C   D   E   F\n");	 // 頂部座標
+	printf("\n   A   B   C   D   E   F\n");	 // 頂部座標 (A-F 對應 Col 0-5)
 	printf(" +-----------------------+\n");
 
-	for (int row = 0; row < ROW; row++) {
-		printf("%d|", row);	 // 左側座標
+	// 【修改 1】迴圈只跑 0 到 5 (共 6 行)
+	for (int row = 0; row < 6; row++) {
+		printf("%d|", row);	 // 左側座標 (0-5)
 
-		for (int col = 0; col < COL; col++) {
-			int sq = row * COL + col;
+		// 【修改 2】迴圈只跑 0 到 5 (共 6 列)
+		for (int col = 0; col < 6; col++) {
+			// 【關鍵轉換】
+			// 顯示座標 (row, col) 對應到 物理座標 (row+1, col+1)
+			// 物理 Index = (物理 Row) * 8 + (物理 Col)
+			int sq = (row + 1) * 8 + (col + 1);
+
 			uint64_t mask = 1ULL << sq;
 
 			// 檢查這一格是誰
@@ -619,13 +622,7 @@ void GST::print_board() {
 			} else if (emy_blue & mask) {
 				printf(" b  ");	 // 敵方用小寫
 			} else {
-				// 處理空地與出入口符號
-				if (row == 0 && col == 0)
-					printf(" <  ");	 // 入口
-				else if (row == 0 && col == COL - 1)
-					printf(" >  ");	 // 出口
-				else
-					printf(" .  ");	 // 普通空地
+				printf(" .  ");	 // 普通空地 (不再印護城河的 < > 符號)
 			}
 		}
 		printf("|\n");
@@ -633,10 +630,9 @@ void GST::print_board() {
 	printf(" +-----------------------+\n");
 
 	// ==========================================
-	// 統計資訊 (因為 Bitboard 沒有 ID，改印數量)
+	// 統計資訊 (保持不變)
 	// ==========================================
 
-	// 使用之前的 helper 或直接用 popcount64
 	int my_r_cnt = popcount64(my_red);
 	int my_b_cnt = popcount64(my_blue);
 	int emy_r_cnt = popcount64(emy_red);
@@ -675,16 +671,16 @@ struct GameStats {
 
 	GameStats()
 		: total_games(0),
-		  mcts_wins(0),
-		  mcts_escape(0),
-		  mcts_enemy_red(0),
-		  mcts_enemy_blue(0),
-		  ismcts_total_steps(0),
-		  ismcts_total_times(0.0),
 		  ismcts_wins(0),
 		  ismcts_escape(0),
 		  ismcts_enemy_red(0),
 		  ismcts_enemy_blue(0),
+		  ismcts_total_steps(0),
+		  ismcts_total_times(0.0),
+		  mcts_wins(0),
+		  mcts_escape(0),
+		  mcts_enemy_red(0),
+		  mcts_enemy_blue(0),
 		  draws(0) {}
 };
 
@@ -727,57 +723,84 @@ void print_progress_bar(int current, int total) {
 			  << std::flush;
 }
 
+// 邏輯座標 (0~35) -> 物理座標 (0~63)
+// 邏輯 (r, c) -> 物理 (r+1, c+1) -> Index: (r+1)*8 + (c+1)
+static inline int _to_phy(int logical_sq) {
+	int r = logical_sq / 6;
+	int c = logical_sq % 6;
+	return (r + 1) * 8 + (c + 1);
+}
+
 // ==========================================
 // 初始化：預先計算所有 Lookups
 // ==========================================
 void GST::init_tuple_tables(DATA& d) {
-	// 確保只初始化一次
 	if (!pat_1x4.empty()) return;
 
+	// 【保持不變】這裡的 Offset 必須維持 6x6 的邏輯！
+	// 因為 _get_loc 函式是用來算 pattern ID 去查 d.trans 的，
+	// 而 d.trans 是用 6x6 邏輯訓練的。
 	static const int off_1x4[4] = {0, 1, 2, 3};
 	static const int off_2x2[4] = {0, 1, 6, 7};
 	static const int off_4x1[4] = {0, 6, 12, 18};
 
-	// 遍歷所有可能的基底位置 (0~35)
+	// 【保持不變】遍歷邏輯基底 (0~35)
 	for (int base = 0; base < 36; base++) {
-		// 1. 處理 1x4
-		if (_is_valid(base, off_1x4)) {
-			PatternInfo p;
-			for (int i = 0; i < 4; i++) p.sq[i] = base + off_1x4[i];
-			// 關鍵：直接存好查表後的 index，保持檔案相容性
-			p.trans_idx = d.trans[_get_loc(base, off_1x4)];
-			pat_1x4.push_back(p);
-		}
+		// Lambda: 封裝重複邏輯，避免寫錯
+		auto process_pattern = [&](const int* logical_offset, std::vector<PatternInfo>& out_vec) {
+			// 使用前面改名過的 _is_valid_logical (檢查 6x6 邊界)
+			if (_is_valid_logical(base, logical_offset)) {
+				PatternInfo p;
 
-		// 2. 處理 2x2
-		if (_is_valid(base, off_2x2)) {
-			PatternInfo p;
-			for (int i = 0; i < 4; i++) p.sq[i] = base + off_2x2[i];
-			p.trans_idx = d.trans[_get_loc(base, off_2x2)];
-			pat_2x2.push_back(p);
-		}
+				// 1. 查權重 (Brain)：使用「邏輯座標」計算 Pattern ID
+				// 這樣才能跟 DATA 裡的舊權重對上
+				p.trans_idx = d.trans[_get_loc(base, logical_offset)];
 
-		// 3. 處理 4x1
-		if (_is_valid(base, off_4x1)) {
-			PatternInfo p;
-			for (int i = 0; i < 4; i++) p.sq[i] = base + off_4x1[i];
-			p.trans_idx = d.trans[_get_loc(base, off_4x1)];
-			pat_4x1.push_back(p);
-		}
+				// 2. 存座標 (Body)：【必須修改】轉成「物理座標」存起來
+				// 這樣 compute_board_weight 跑迴圈時，才能直接拿 p.sq 去對 8x8 Bitboard 做位元運算
+				for (int i = 0; i < 4; i++) {
+					// logical_sq = base + logical_offset[i]
+					// 轉成 physical (8x8)
+					p.sq[i] = _to_phy(base + logical_offset[i]);
+				}
+
+				out_vec.push_back(p);
+			}
+		};
+
+		// 處理三種 Pattern
+		process_pattern(off_1x4, pat_1x4);
+		process_pattern(off_2x2, pat_2x2);
+		process_pattern(off_4x1, pat_4x1);
 	}
 }
 
 void GST::init_lookup_tables() {
-	// 預先計算每一格的合法移動 (這段只跑一次，慢沒關係)
-	for (int sq = 0; sq < 36; sq++) {
+	// 【修正 1】範圍擴大為 0 ~ 63 (8x8)
+	for (int sq = 0; sq < 64; sq++) {
 		uint64_t mask = 0;
-		int r = sq / 6;
-		int c = sq % 6;
 
-		if (c > 0) mask |= (1ULL << (sq - 1));	// Left
-		if (c < 5) mask |= (1ULL << (sq + 1));	// Right
-		if (r > 0) mask |= (1ULL << (sq - 6));	// Up
-		if (r < 5) mask |= (1ULL << (sq + 6));	// Down
+		// 【修正 2】座標計算基於寬度 8
+		int r = sq / 8;	 // Row 0~7
+		int c = sq % 8;	 // Col 0~7
+
+		// 【修正 3】位移量調整 (上下變成 +/- 8)
+
+		// Left (向左 -1)
+		// 只要不是在第 1 行 (Col 1)，就可以往左
+		if (c > 1) mask |= (1ULL << (sq - 1));
+
+		// Right (向右 +1)
+		// 只要不是在第 6 行 (Col 6)，就可以往右
+		if (c < 6) mask |= (1ULL << (sq + 1));
+
+		// Up (向上 -8)
+		// 只要不是在第 1 列 (Row 1)，就可以往上
+		if (r > 1) mask |= (1ULL << (sq - 8));
+
+		// Down (向下 +8)
+		// 只要不是在第 6 列 (Row 6)，就可以往下
+		if (r < 6) mask |= (1ULL << (sq + 8));
 
 		KING_MOVES[sq] = mask;
 	}
@@ -867,14 +890,14 @@ int GST::highest_weight(DATA& d) {
 		int sq = bit_scan_forward(temp_scan);  // 找出棋子位置
 		temp_scan &= temp_scan - 1;
 
-		int p_row = sq / 6;
-		int p_col = sq % 6;
+		int p_row = sq / 8;
+		int p_col = sq % 8;
 
 		// 計算到 4 個角落的曼哈頓距離
 		int dist_to_0 = p_row + p_col;
-		int dist_to_5 = p_row + (5 - p_col);
-		int dist_to_30 = (5 - p_row) + p_col;
-		int dist_to_35 = (5 - p_row) + (5 - p_col);
+		int dist_to_5 = p_row + (7 - p_col);
+		int dist_to_30 = (7 - p_row) + p_col;
+		int dist_to_35 = (7 - p_row) + (7 - p_col);
 
 		// 將這顆棋子(sq)對 4 個角落的數據加入列表
 		pieces_distances.push_back(std::make_tuple(sq, 0, dist_to_0));
@@ -889,26 +912,28 @@ int GST::highest_weight(DATA& d) {
 				  return std::get<2>(a) < std::get<2>(b);
 			  });
 
-	// 分配狀態追蹤
-	// 原本是用 piece_idx (0~15)，這裡改用 pos (0~35) 來標記某個位置的棋子是否已分配
-	bool pos_assigned[36];
-	bool corner_assigned[4];
-	// Map: [Position 0~35] -> AssignedCornerID (0~3)
-	int assigned_corner_for_pos[36];
+	// 【修正】範圍擴大為 64，因為 sq 是物理座標 (0~63)
+	bool pos_assigned[64];
 
+	bool corner_assigned[4];  // 這個不用改，因為角落只有 4 個
+
+	// 【修正】Map: [Position 0~63] -> AssignedCornerID (0~3)
+	int assigned_corner_for_pos[64];
+
+	// 初始化 (std::begin/end 會自動抓到新的大小，所以這裡不用動)
 	std::fill(std::begin(pos_assigned), std::end(pos_assigned), false);
 	std::fill(std::begin(corner_assigned), std::end(corner_assigned), false);
 	std::fill(std::begin(assigned_corner_for_pos), std::end(assigned_corner_for_pos), -1);
 
-	// 執行貪婪分配
+	// 執行貪婪分配 (邏輯不用變)
 	for (const auto& tuple : pieces_distances) {
-		int sq = std::get<0>(tuple);
+		int sq = std::get<0>(tuple);  // 這裡是 0~63
 		int corner = std::get<1>(tuple);
 
 		if (!pos_assigned[sq] && !corner_assigned[corner]) {
 			pos_assigned[sq] = true;
 			corner_assigned[corner] = true;
-			assigned_corner_for_pos[sq] = corner;  // 記住：位於 sq 的棋子負責去 corner
+			assigned_corner_for_pos[sq] = corner;
 		}
 
 		if (corner_assigned[0] && corner_assigned[1] && corner_assigned[2] && corner_assigned[3]) {
@@ -930,18 +955,15 @@ int GST::highest_weight(DATA& d) {
 		// 簡單逆推一下：
 		int diff = to - from;
 		int direction = -1;
-		if (to == ESCAPE_LEFT_TARGET)
-			direction = 1;	// 左邊逃脫視為向左 (West)
-		else if (to == ESCAPE_RIGHT_TARGET)
-			direction = 2;	// 右邊逃脫視為向右 (East)
-		else if (diff == -6)
+
+		if (diff == -8)		// 【修正 2】原本是 -6，現在 8x8 改成 -8
 			direction = 0;	// Up
 		else if (diff == -1)
-			direction = 1;	// Left
+			direction = 1;	// Left (包含一般向左 & 左邊逃脫)
 		else if (diff == 1)
-			direction = 2;	// Right
-		else if (diff == 6)
-			direction = 3;	// Down
+			direction = 2;	 // Right (包含一般向右 & 右邊逃脫)
+		else if (diff == 8)	 // 【修正 3】原本是 6，現在 8x8 改成 8
+			direction = 3;	 // Down
 
 		// 判斷該棋子顏色 (用於特殊規則)
 		bool is_my_blue = (nowTurn == 0) ? (my_blue & (1ULL << from)) : (emy_blue & (1ULL << from));
@@ -954,55 +976,71 @@ int GST::highest_weight(DATA& d) {
 
 		// 規則 1: 藍棋已經在門口，且往外走 -> 必勝 (權重 1.0)
 		// pos[piece] == 0 && direction == 1 (Left) && nowTurn == USER && board[0] == BLUE
-		if (from == 0 && direction == 1 && nowTurn == 0 && is_my_blue) {
-			WEIGHT[move_index] = 999999.0;
+		if (from == 9 && direction == 1 && nowTurn == 0 && is_my_blue) {
+			WEIGHT[move_index] = 1.0f;
 			is_special_move = true;
-		} else if (from == 5 && direction == 2 && nowTurn == 0 && is_my_blue) {
-			WEIGHT[move_index] = 999999.0;
+		} else if (from == 14 && direction == 2 && nowTurn == 0 && is_my_blue) {
+			WEIGHT[move_index] = 1.0f;
 			is_special_move = true;
-		} else if (from == 30 && direction == 1 && nowTurn == 1 && is_my_blue) {
-			WEIGHT[move_index] = 999999.0;
+		} else if (from == 49 && direction == 1 && nowTurn == 1 && is_my_blue) {
+			WEIGHT[move_index] = 1.0f;
 			is_special_move = true;
-		} else if (from == 35 && direction == 2 && nowTurn == 1 && is_my_blue) {
-			WEIGHT[move_index] = 999999.0;
+		} else if (from == 54 && direction == 2 && nowTurn == 1 && is_my_blue) {
+			WEIGHT[move_index] = 1.0f;
 			is_special_move = true;
 		}
-		// 規則 2: 藍棋準備衝門 (Checkmate Setups)
-		// 注意：請確保在此段落上方（Rule 1 之前）有宣告 bool is_special_move = false;
-		else if (from == 4 && direction == 2 && nowTurn == 0 && is_my_blue) {
-			bool pos5_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 5));
-			bool pos11_safe = !((emy_red | emy_blue) & (1ULL << 11));
+		// ---------------------------------------------------
+		// 規則 2: 藍棋準備衝門 (Checkmate Setups) - 8x8 修正版
+		// ---------------------------------------------------
 
-			if (pos5_empty && pos11_safe) {
-				WEIGHT[move_index] = 1.0f;	// 給予高分 (1.0)
-				is_special_move = true;		// 標記已處理
-			}
-			// 如果條件不符，is_special_move 保持 false，自然會流到下面的一般評估
-		} else if (from == 1 && direction == 1 && nowTurn == 0 && is_my_blue) {
-			bool pos0_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 0));
-			bool pos6_safe = !((emy_red | emy_blue) & (1ULL << 6));
+		// Case A: User (上) 在 (1,5) 準備往右衝向 (1,6) [舊座標 4->5]
+		// From: 13 (1,5), Dir: 2 (Right)
+		else if (from == 13 && direction == 2 && nowTurn == 0 && is_my_blue) {
+			// 檢查目標 (1,6) 是否為空 [Index 14]
+			bool pos14_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 14));
+			// 檢查下方威脅 (2,6) 是否安全 [Index 22]
+			bool pos22_safe = !((emy_red | emy_blue) & (1ULL << 22));
 
-			if (pos0_empty && pos6_safe) {
+			if (pos14_empty && pos22_safe) {
 				WEIGHT[move_index] = 1.0f;
 				is_special_move = true;
 			}
 		}
-		// Enemy mirror cases (敵方鏡像規則)
-		else if (from == 34 && direction == 2 && nowTurn == 1 && is_my_blue) {
-			bool pos35_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 35));
-			bool pos29_safe =
-				!((my_red | my_blue) &
-				  (1ULL << 29));  // 修正：應檢查該位置是否有我方棋子擋路或單純判斷安全
+		// Case B: User (上) 在 (1,2) 準備往左衝向 (1,1) [舊座標 1->0]
+		// From: 10 (1,2), Dir: 1 (Left)
+		else if (from == 10 && direction == 1 && nowTurn == 0 && is_my_blue) {
+			// 檢查目標 (1,1) 是否為空 [Index 9]
+			bool pos9_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 9));
+			// 檢查下方威脅 (2,1) 是否安全 [Index 17]
+			bool pos17_safe = !((emy_red | emy_blue) & (1ULL << 17));
 
-			if (pos35_empty && pos29_safe) {
+			if (pos9_empty && pos17_safe) {
 				WEIGHT[move_index] = 1.0f;
 				is_special_move = true;
 			}
-		} else if (from == 31 && direction == 1 && nowTurn == 1 && is_my_blue) {
-			bool pos30_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 30));
-			bool pos24_safe = !((my_red | my_blue) & (1ULL << 24));
+		}
+		// Case C: Enemy (下) 在 (6,5) 準備往右衝向 (6,6) [舊座標 34->35]
+		// From: 53 (6,5), Dir: 2 (Right)
+		else if (from == 53 && direction == 2 && nowTurn == 1 && is_my_blue) {
+			// 檢查目標 (6,6) 是否為空 [Index 54]
+			bool pos54_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 54));
+			// 檢查上方威脅 (5,6) 是否安全 [Index 46]
+			bool pos46_safe = !((my_red | my_blue) & (1ULL << 46));
 
-			if (pos30_empty && pos24_safe) {
+			if (pos54_empty && pos46_safe) {
+				WEIGHT[move_index] = 1.0f;
+				is_special_move = true;
+			}
+		}
+		// Case D: Enemy (下) 在 (6,2) 準備往左衝向 (6,1) [舊座標 31->30]
+		// From: 50 (6,2), Dir: 1 (Left)
+		else if (from == 50 && direction == 1 && nowTurn == 1 && is_my_blue) {
+			// 檢查目標 (6,1) 是否為空 [Index 49]
+			bool pos49_empty = !((my_red | my_blue | emy_red | emy_blue) & (1ULL << 49));
+			// 檢查上方威脅 (5,1) 是否安全 [Index 41]
+			bool pos41_safe = !((my_red | my_blue) & (1ULL << 41));
+
+			if (pos49_empty && pos41_safe) {
 				WEIGHT[move_index] = 1.0f;
 				is_special_move = true;
 			}
@@ -1021,13 +1059,13 @@ int GST::highest_weight(DATA& d) {
 		// 套用角落獎勵 (Corner Bonus)
 		// ---------------------------------------------------
 		int dst = to;
-		int row = dst / 6;
-		int col = dst % 6;
+		int row = dst / 8;
+		int col = dst % 8;
 
 		int d0 = row + col;
-		int d5 = row + (5 - col);
-		int d30 = (5 - row) + col;
-		int d35 = (5 - row) + (5 - col);
+		int d5 = row + (7 - col);
+		int d30 = (7 - row) + col;
+		int d35 = (7 - row) + (7 - col);
 
 		float corner_bonus = 1.0;
 
@@ -1037,20 +1075,19 @@ int GST::highest_weight(DATA& d) {
 			int current_dist_val = 999;
 
 			// 計算移動前的距離
-			int s_row = from / 6;
-			int s_col = from % 6;
-
+			int s_row = from / 8;
+			int s_col = from % 8;
 			if (assigned_corner == 0) {
 				current_dist_val = s_row + s_col;
 				if (d0 < current_dist_val) corner_bonus = 1.01;	 // 變近了！
 			} else if (assigned_corner == 1) {
-				current_dist_val = s_row + (5 - s_col);
+				current_dist_val = s_row + (7 - s_col);
 				if (d5 < current_dist_val) corner_bonus = 1.01;
 			} else if (assigned_corner == 2) {
-				current_dist_val = (5 - s_row) + s_col;
+				current_dist_val = (7 - s_row) + s_col;
 				if (d30 < current_dist_val) corner_bonus = 1.01;
 			} else if (assigned_corner == 3) {
-				current_dist_val = (5 - s_row) + (5 - s_col);
+				current_dist_val = (7 - s_row) + (7 - s_col);
 				if (d35 < current_dist_val) corner_bonus = 1.01;
 			}
 		}
@@ -1065,7 +1102,81 @@ int GST::highest_weight(DATA& d) {
 			WEIGHT[move_index] *= 1.01;
 		}
 	}
+	/*
+	// ================================================================
+	// [新增] Bitboard Debug Log: 記錄所有候選步的權重與路徑
+	// ================================================================
+	{
+		static std::ofstream wlog("bitboard_weight_debug_log.txt", std::ios::out | std::ios::app);
 
+		if (wlog.is_open()) {
+			wlog << "--------------------------------------------------\n";
+			wlog << "Turn: " << (nowTurn == 0 ? "USER (Player 0)" : "ENEMY (Player 1)") << "\n";
+
+			for (int i = 0; i < root_nmove; ++i) {
+				int m = root_moves[i];
+				int from = (m >> 8) & 0xFF;	 // Bitboard Move Format: High 8 bits = From
+				int to = m & 0xFF;			 // Bitboard Move Format: Low 8 bits = To
+
+				// 判斷移動棋子的顏色 (為了 Log 中標示 ESCAPE)
+				// 這裡重新抓一次顏色，確保沒錯
+				bool is_blue_piece = false;
+				if (nowTurn == 0) {
+					if (my_blue & (1ULL << from)) is_blue_piece = true;
+				} else {
+					if (emy_blue & (1ULL << from)) is_blue_piece = true;
+				}
+
+				// --- 座標轉字串 Helper ---
+				// --- 座標轉字串 Helper ---
+				auto to_str = [&](int idx, bool is_dest) -> std::string {
+					// 1. 特殊處理：Bitboard 的特殊 Escape Target 座標 (位於護城河)
+					if (is_dest) {
+						if (idx == 8 || idx == 48) return "ESC_L";	 // (1,0) (6,0)
+						if (idx == 15 || idx == 55) return "ESC_R";	 // (1,7) (6,7)
+					}
+
+					// 2. 取得物理行列 (0~7)
+					int p_row = idx / 8;
+					int p_col = idx % 8;
+
+					// 3. 轉回邏輯行列 (0~5)
+					// 物理盤面的有效區域是 1~6，所以要減 1 才是人類習慣的 A0~F5
+					int l_row = p_row - 1;
+					int l_col = p_col - 1;
+
+					// 4. 邊界檢查 (確保是有效棋盤格)
+					// 原本 idx >= 36 是舊邏輯，現在物理 index 最大到 63
+					// 但我們只關心 l_row, l_col 是否在 0~5 之間
+					if (l_row < 0 || l_row > 5 || l_col < 0 || l_col > 5) return "OUT";
+
+					// 5. 格式化字串 (A~F + 0~5)
+					char c = 'A' + l_col;
+					return std::string(1, c) + std::to_string(l_row);
+				};
+
+				std::string from_s = to_str(from, false);
+				std::string to_s = to_str(to, true);
+
+				// 算出方向 ID 方便對照 (雖非必要但好讀)
+				int diff = to - from;
+				int dir_id = -1;
+				if (diff == -8)
+					dir_id = 0;	 // N
+				else if (diff == -1)
+					dir_id = 1;	 // W
+				else if (diff == 1)
+					dir_id = 2;	 // E
+				else if (diff == 8)
+					dir_id = 3;	 // S
+
+				wlog << "Move: " << from_s << " -> " << to_s << " | Dir: " << dir_id
+					 << " | Weight: " << std::fixed << std::setprecision(5) << WEIGHT[i] << "\n";
+			}
+			wlog.flush();
+		}
+	}
+	*/
 	// ==========================================
 	// 3. 選擇策略 (Selection Logic) - 完全復刻
 	// ==========================================
@@ -1180,11 +1291,18 @@ void log_to_file(std::ofstream& file, GST& game, int move, int player_id, int tu
 
 	// 轉換座標顯示 (例如 0 -> A0)
 	auto to_coord = [](int pos) -> std::string {
-		if (pos == 60) return "ESCAPE(Left)";
-		if (pos == 61) return "ESCAPE(Right)";
-		char col = 'A' + (pos % 6);
-		int row = pos / 6;
-		return std::string(1, col) + std::to_string(row);
+		if (pos == 8 || pos == 48) return "ESC_L";	// 8x8 特殊位置
+		if (pos == 15 || pos == 55) return "ESC_R";
+
+		int p_row = pos / 8;  // 改成 8
+		int p_col = pos % 8;  // 改成 8
+
+		// 轉回閱讀用的 A0~F5 (0~5)
+		// 物理座標 (1,1) -> 邏輯 (0,0) -> 'A' + 0, '0' + 0
+		char col_char = 'A' + (p_col - 1);
+		int row_num = p_row - 1;
+
+		return std::string(1, col_char) + std::to_string(row_num);
 	};
 
 	std::string player_name = (player_id == 0) ? "Player 1 (ISMCTS)" : "Player 2 (MCTS)";
@@ -1198,10 +1316,10 @@ void log_to_file(std::ofstream& file, GST& game, int move, int player_id, int tu
 	file << "   A   B   C   D   E   F\n";
 	file << " +-----------------------+\n";
 
-	for (int row = 0; row < 6; row++) {
-		file << row << "|";
-		for (int col = 0; col < 6; col++) {
-			int sq = row * 6 + col;
+	for (int row = 1; row <= 6; row++) {
+		file << (row - 1) << "|";
+		for (int col = 1; col <= 6; col++) {
+			int sq = row * 8 + col;
 			uint64_t mask = 1ULL << sq;
 
 			if (game.my_red & mask)
