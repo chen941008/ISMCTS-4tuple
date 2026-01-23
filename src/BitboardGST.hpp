@@ -78,7 +78,7 @@ class GST {
 
 	static void init_lookup_tables();
 
-	static uint64_t KING_MOVES[36];
+	static uint64_t KING_MOVES[64];
 
 	/** @brief 檢查移動是否獲勝 */
 	bool check_win_move(int move);

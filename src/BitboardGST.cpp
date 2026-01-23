@@ -107,7 +107,7 @@ static int _get_loc(int base_pos, const int* offset) {
 	return (p[0] * 46656 + p[1] * 1296 + p[2] * 36 + p[3]);	 // 36^3, 36^2...
 }
 
-uint64_t GST::KING_MOVES[36];
+uint64_t GST::KING_MOVES[64];
 
 // ==========================================
 // 1. 靜態 Helper: 狀態特徵提取
