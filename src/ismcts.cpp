@@ -353,10 +353,12 @@ double ISMCTS::simulation(GST& state, DATA& d, int root_player) {
 		++step;
 	}
 
-	if (!simState.is_over() && step >= maxMoves) return 0.0;  // Draw / Timeout
-
-	int winner = simState.get_winner();
-	return (winner == root_player) ? 1.0 : -1.0;
+	if (simState.is_over()) {
+		int winner = simState.get_winner();
+		if (winner == -2) return 0.0;  // Draw
+		return (winner == root_player) ? 1.0 : -1.0;
+	}
+	return 0.0;
 }
 
 /**

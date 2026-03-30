@@ -160,8 +160,12 @@ int MCTS::simulation(GST& state) {
 	}
 
 	// Handle game ended or depth limit reached
-	if (!simState.is_over() && depth >= maxDepth) return 0;	 // Draw/Timeout
-	return simState.get_winner() == ENEMY ? 1 : -1;
+	if (simState.is_over()) {
+		int winner = simState.get_winner();
+		if (winner == -2) return 0.0;  // Draw
+		return (winner == ENEMY) ? 1.0 : -1.0;
+	}
+	return 0.0;
 }
 
 /**
