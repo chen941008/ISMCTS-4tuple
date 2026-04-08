@@ -35,6 +35,7 @@ class GST {
 	friend class ISMCTS;
 	friend class MCTS;
 	friend int main();
+	friend int gen_all_move_array(GST& g, int* move_arr);
 
    private:
 	/// @name Board Representation

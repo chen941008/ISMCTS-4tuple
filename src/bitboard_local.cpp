@@ -346,9 +346,44 @@ int GST::gen_move(int* move_arr, int piece, int location, int& count) {
 	return count;
 }
 // ==========================================
-// gen_all_move — Bitboard Shift Version (COMMENTED OUT)
+// gen_all_move — Array Scan Version (COMMENTED OUT — kept for reference)
 // ==========================================
 /*
+int GST::gen_all_move(int* move_arr) {
+	int count = 0;
+	int offset = nowTurn == ENEMY ? PIECES : 0;
+	int* nowTurn_pos = pos + offset;
+
+	for (int i = 0; i < PIECES; i++) {
+		if (pos[i + offset] != -1) {
+			gen_move(move_arr, i + offset, nowTurn_pos[i], count);
+		}
+	}
+	return count;
+}
+*/
+
+// Array reference — callable for verification only
+int gen_all_move_array(GST& g, int* move_arr) {
+	int count = 0;
+	int offset = g.nowTurn == ENEMY ? PIECES : 0;
+
+	for (int i = 0; i < PIECES; i++) {
+		if (g.pos[i + offset] != -1) {
+			g.gen_move(move_arr, i + offset, g.pos[i + offset], count);
+		}
+	}
+	return count;
+}
+
+// ==========================================
+// gen_all_move — Bitboard Shift Version (ACTIVE)
+// ==========================================
+/**
+ * @brief Generates all legal moves using bitboard shifts.
+ * * Direction-major order: N→S→W→E. Produces the same MOVE SET as array version
+ * * (verified by fuzz test), but in a different iteration order.
+ */
 int GST::gen_all_move(int* move_arr) {
 	int count = 0;
 	uint64_t m;
@@ -429,27 +464,6 @@ int GST::gen_all_move(int* move_arr) {
 		}
 	}
 
-	return count;
-}
-*/
-
-// ==========================================
-// gen_all_move — Array Scan Version (ACTIVE)
-// ==========================================
-/**
- * @brief Generates all possible legal moves for the current player.
- * * Piece-major iteration matching gst.cpp move ordering.
- */
-int GST::gen_all_move(int* move_arr) {
-	int count = 0;
-	int offset = nowTurn == ENEMY ? PIECES : 0;
-	int* nowTurn_pos = pos + offset;
-
-	for (int i = 0; i < PIECES; i++) {
-		if (pos[i + offset] != -1) {
-			gen_move(move_arr, i + offset, nowTurn_pos[i], count);
-		}
-	}
 	return count;
 }
 
@@ -1218,6 +1232,7 @@ int GST::highest_weight(DATA& d) {
 
 DATA data;
 
+#ifndef TEST_MODE
 int main() {
 	std::random_device rd;
 	std::uniform_int_distribution<> dist(0, 7);
@@ -1336,3 +1351,4 @@ int main() {
 
 	return 0;
 }
+#endif	// TEST_MODE
