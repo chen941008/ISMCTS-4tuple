@@ -851,7 +851,9 @@ float GST::get_weight(int base_pos, const int* offset, DATA& d, const int* featu
 
 /**
  * @brief Computes the aggregated weight of the entire board.
- * * Matches gst.cpp: board[] iteration, piece_nums[] for LUT, no proximity bonus.
+ * * Matches gst.cpp semantics: board[] iteration, piece_nums[] for LUT, no proximity bonus.
+ * * Optimizations: LUT hoisted once (was re-checked 61× per call), inlined feature extraction.
+ * * CRITICAL: Single pos loop (0→35) preserved for FP accumulation order parity.
  */
 float GST::compute_board_weight(DATA& d) {
 	float total_weight = 0;
@@ -859,26 +861,59 @@ float GST::compute_board_weight(DATA& d) {
 	// 1. Create a fast L1 cache on stack
 	int feature_cache[ROW * COL];
 
-	// 2. Iterate board once to fill cache
+	// 2. Iterate board once to fill cache (identical to gst.cpp)
 	if (nowTurn == USER) {
 		for (int pos = 0; pos < ROW * COL; pos++) {
 			feature_cache[pos] = (board[pos] < 0) ? 3 : board[pos];
 		}
-	} else {  // nowTurn == ENEMY
+	} else {
 		for (int pos = 0; pos < ROW * COL; pos++) {
 			feature_cache[pos] = (board[pos] > 0) ? 3 : -board[pos];
 		}
 	}
 
+	// 3. Hoist LUT selection — same logic as get_weight but done ONCE
+	const float* lut;
+	if (nowTurn == USER) {
+		if (piece_nums[2] == 1)
+			lut = d.LUTwr_U_R1;
+		else if (piece_nums[1] == 1)
+			lut = d.LUTwr_U_B1;
+		else
+			lut = d.LUTwr_U;
+	} else {
+		if (piece_nums[0] == 1)
+			lut = d.LUTwr_E_R1;
+		else if (piece_nums[3] == 1)
+			lut = d.LUTwr_E_B1;
+		else
+			lut = d.LUTwr_E;
+	}
+
+	// 4. Single pos loop — SAME accumulation order as gst.cpp (1x4 → 4x1 → 2x2 per pos)
 	for (int pos = 0; pos < ROW * COL; pos++) {
-		if (is_valid_pattern(pos, offset_1x4)) {
-			total_weight += get_weight(pos, offset_1x4, d, feature_cache);
+		const int row = pos / COL;
+		const int col = pos % COL;
+
+		// offset_1x4: {0,1,2,3} — valid when col <= 2
+		if (col <= 2) {
+			const int f = feature_cache[pos] * 64 + feature_cache[pos + 1] * 16 +
+						  feature_cache[pos + 2] * 4 + feature_cache[pos + 3];
+			total_weight += lut[d.LUT_idx(d.trans[get_loc(pos, offset_1x4)], f)];
 		}
-		if (is_valid_pattern(pos, offset_4x1)) {
-			total_weight += get_weight(pos, offset_4x1, d, feature_cache);
+
+		// offset_4x1: {0,6,12,18} — valid when row <= 2
+		if (row <= 2) {
+			const int f = feature_cache[pos] * 64 + feature_cache[pos + 6] * 16 +
+						  feature_cache[pos + 12] * 4 + feature_cache[pos + 18];
+			total_weight += lut[d.LUT_idx(d.trans[get_loc(pos, offset_4x1)], f)];
 		}
-		if (is_valid_pattern(pos, offset_2x2)) {
-			total_weight += get_weight(pos, offset_2x2, d, feature_cache);
+
+		// offset_2x2: {0,1,6,7} — valid when col <= 4 AND row <= 4
+		if (col <= 4 && row <= 4) {
+			const int f = feature_cache[pos] * 64 + feature_cache[pos + 1] * 16 +
+						  feature_cache[pos + 6] * 4 + feature_cache[pos + 7];
+			total_weight += lut[d.LUT_idx(d.trans[get_loc(pos, offset_2x2)], f)];
 		}
 	}
 
